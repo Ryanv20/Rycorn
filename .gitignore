@@ -1,6 +1,23 @@
+# Dependencies and package-manager caches
 node_modules/
+.pnpm-store/
+
+# Build and tooling output
 dist/
+build/
+coverage/
+.vite/
+.turbo/
+*.tsbuildinfo
+
+# Logs and local runtime files
 *.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local configuration and secrets
 .env
 .env.*
 !.env.example
