@@ -1,0 +1,7 @@
+World Port Index Number,Main Port Name,Country Code,Latitude,Longitude,Harbor Type,Harbor Size,Maximum Vessel Size
+1010,Test Port A,US,45,-120,Coastal,L,Over 500
+1020,Test Port B,US,50,-130,River,S,Under 500
+1010,Duplicate Port,US,45,-120,Coastal,L,Over 500
+1030,Invalid Lat Port,US,999.2,-120,Coastal,L,Over 500
+1040,Invalid Lon Port,US,45,200,Coastal,L,Over 500
+,Empty ID Port,US,45,-120,,,

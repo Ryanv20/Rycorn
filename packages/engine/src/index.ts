@@ -1,0 +1,18 @@
+export { SimulationEngine, type SimulationInput, type SimulationResult, type VesselDefinition, type CargoDefinition } from './simulation/engine/SimulationEngine.js';
+export { NetworkBuilder } from './network/NetworkBuilder.js';
+export { VesselCapability } from './domain/network/VesselCapability.js';
+export * from './domain/network/MaritimeNetwork.js';
+export * from './domain/network/NetworkEdge.js';
+export * from './domain/network/NetworkNode.js';
+export * from './domain/ports/CanonicalPort.js';
+export * from './domain/ports/Port.js';
+export * from './domain/regions/Region.js';
+export * from './domain/shared/GeoPosition.js';
+export * from './domain/shared/PortId.js';
+export * from './domain/shared/Provenance.js';
+export * from './domain/shared/enums.js';
+export * from './simulation/events/SimulationEvent.js';
+export * from './simulation/state/VesselState.js';
+export * from './simulation/state/CargoState.js';
+export * from './simulation/SimulationConfig.js';
+export * from './simulation/state/SimulationContext.js';

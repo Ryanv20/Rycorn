@@ -1,0 +1,23 @@
+{
+  "name": "rycon-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rycon — maritime network simulation engine",
+  "scripts": {
+    "test": "pnpm --filter @rycon/engine test",
+    "dev:server": "pnpm --filter @rycon/server dev",
+    "dev:client": "pnpm --filter @rycon/client dev",
+    "build:client": "pnpm --filter @rycon/client build",
+    "demo": "pnpm tsx packages/engine/scripts/demo.ts"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.22.0",
+      "onFail": "download"
+    }
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12"
+  }
+}

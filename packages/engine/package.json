@@ -1,0 +1,21 @@
+{
+  "name": "@rycon/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@turf/helpers": "^7.4.0",
+    "@turf/turf": "^7.4.0",
+    "csv-parse": "^7.0.2",
+    "zod": "^4.4.3"
+  }
+}

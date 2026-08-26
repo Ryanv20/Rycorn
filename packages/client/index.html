@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rycon Simulation Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <style>
+      body { margin: 0; font-family: sans-serif; }
+      .ship-avatar { background: transparent; border: 0; }
+      .ship-symbol { position: relative; display: block; width: 34px; height: 34px; filter: drop-shadow(0 2px 2px rgba(15,23,42,0.55)); transform: rotate(-18deg); }
+      .ship-hull { position: absolute; left: 8px; top: 16px; width: 20px; height: 9px; background: #f8fafc; border: 2px solid #0f172a; border-radius: 2px 2px 10px 10px; }
+      .ship-cabin { position: absolute; left: 13px; top: 10px; width: 9px; height: 8px; background: #38bdf8; border: 2px solid #0f172a; border-bottom: 0; border-radius: 3px 3px 0 0; }
+      .ship-wake { position: absolute; left: 3px; top: 19px; width: 8px; height: 3px; border-top: 2px solid #f8fafc; border-bottom: 2px solid #f8fafc; opacity: 0.9; }
+      #root { display: flex; height: 100vh; flex-direction: column; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
