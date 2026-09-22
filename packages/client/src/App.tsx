@@ -4,6 +4,7 @@ import SimulationControls from './components/SimulationControls';
 import EventLog from './components/EventLog';
 import Clock from './components/Clock';
 import AdminSidebar from './components/AdminSidebar';
+import DSSystemPage from './components/DSSystemPage';
 
 export interface AppState {
   vessels: any[];
@@ -16,6 +17,7 @@ export interface AppState {
 }
 
 export default function App() {
+  const [page, setPage] = useState(() => window.location.pathname.toLowerCase());
   const [state, setState] = useState<AppState>({
     vessels: [],
     cargoes: [],
@@ -28,8 +30,17 @@ export default function App() {
   const [eventLogOpen, setEventLogOpen] = useState(true);
 
   const resetSimulation = () => setState(s => ({ ...s, vessels: [], cargoes: [], events: [], simulationTime: 0 }));
+  const openDsSystem = () => {
+    window.history.pushState({}, '', '/DS_system');
+    setPage('/ds_system');
+  };
+  const openSimulation = () => {
+    window.history.pushState({}, '', '/');
+    setPage('/');
+  };
 
   useEffect(() => {
+    if (page === '/ds_system') return;
     const ws = new WebSocket('ws://127.0.0.1:3000/ws');
     
     ws.onopen = () => setState(s => ({ ...s, connected: true }));
@@ -54,7 +65,9 @@ export default function App() {
     };
 
     return () => ws.close();
-  }, []);
+  }, [page]);
+
+  if (page === '/ds_system') return <DSSystemPage onBack={openSimulation} />;
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
@@ -62,6 +75,7 @@ export default function App() {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', padding: 10, background: '#eee', gap: 20 }}>
         <SimulationControls onReset={resetSimulation} />
+        <button onClick={openDsSystem}>DS SYSTEM</button>
         <Clock simulationTime={state.simulationTime} />
         <div>Status: {state.connected ? 'Connected' : 'Disconnected'}</div>
       </div>

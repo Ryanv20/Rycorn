@@ -211,6 +211,19 @@ importers:
         specifier: ^4.23.12
         version: 4.23.12
 
+  DS_System:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12))
+
   packages/client:
     dependencies:
       leaflet:
@@ -281,6 +294,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.1
         version: 11.3.0
+      '@rycon/ds-system':
+        specifier: workspace:*
+        version: link:../../DS_System
       '@rycon/engine':
         specifier: workspace:*
         version: link:../engine

@@ -1,0 +1,34 @@
+:root { color: #d9e3ec; background: #0b1117; font-family: Georgia, 'Times New Roman', serif; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.ds-page { min-height: 100vh; box-sizing: border-box; padding: 38px clamp(20px, 5vw, 72px); background: radial-gradient(circle at 80% 0%, #193243 0, transparent 42%), #0b1117; color: #d9e3ec; }
+.ds-access { display: grid; place-items: center; position: relative; }
+.ds-back { position: absolute; top: 28px; left: 28px; background: transparent; color: #9eb2c2; border: 0; }
+.ds-access-panel { width: min(420px, 100%); border: 1px solid #294555; padding: 36px; background: rgba(15, 27, 36, .9); box-shadow: 0 20px 70px rgba(0,0,0,.25); }
+.ds-kicker { color: #65c5ba; font: 700 11px/1.2 monospace; letter-spacing: 1.6px; margin: 0 0 10px; }
+.ds-page h1, .ds-page h2, .ds-page p { margin-top: 0; }
+.ds-page h1 { font-size: clamp(34px, 6vw, 64px); margin-bottom: 8px; font-weight: 400; }
+.ds-page h2 { font-size: 23px; font-weight: 400; }
+.ds-access-panel form, .ds-form { display: grid; gap: 12px; margin-top: 28px; }
+.ds-access-panel label { display: grid; gap: 8px; color: #9eb2c2; font: 12px monospace; }
+.ds-page input, .ds-page select { box-sizing: border-box; width: 100%; color: #eaf2f7; background: #101c24; border: 1px solid #345262; padding: 11px 12px; }
+.ds-primary { color: #061316; background: #65c5ba; border: 0; padding: 11px 15px; font-weight: 700; }
+.ds-header { display: flex; justify-content: space-between; gap: 24px; align-items: end; border-bottom: 1px solid #294555; padding-bottom: 28px; }
+.ds-actions { display: flex; gap: 8px; }
+.ds-actions button, .ds-panel-title span { color: #9eb2c2; background: transparent; border: 1px solid #345262; padding: 9px 12px; }
+.ds-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: #294555; margin: 28px 0; }
+.ds-metrics article { background: #101a22; padding: 20px; display: grid; gap: 7px; }
+.ds-metrics span, .ds-metrics small, .ds-row span { color: #8ca2b2; font: 12px monospace; }
+.ds-metrics strong { font-size: 30px; font-weight: 400; }
+.ds-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.ds-panel { border: 1px solid #294555; background: rgba(16, 26, 34, .86); padding: 22px; }
+.ds-panel-title { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.ds-list { margin-top: 22px; border-top: 1px solid #294555; }
+.ds-row { display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 12px; align-items: center; padding: 13px 0; border-bottom: 1px solid #203743; font-size: 14px; }
+.ds-row b { color: #65c5ba; font: 12px monospace; }
+.ds-snapshot { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 22px; }
+.ds-snapshot > div { flex: 1; min-width: 240px; }
+.ds-snapshot pre { width: 100%; box-sizing: border-box; color: #a9e4dc; background: #091016; padding: 14px; overflow: auto; }
+.ds-error { color: #ffae9e; margin-top: 18px; }
+.ds-banner { border: 1px solid #714439; padding: 12px; }
+@media (max-width: 760px) { .ds-header, .ds-actions { align-items: start; flex-direction: column; } .ds-metrics, .ds-grid { grid-template-columns: 1fr; } .ds-row { grid-template-columns: 1fr; gap: 5px; } }

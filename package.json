@@ -7,6 +7,7 @@
     "test": "pnpm --filter @rycon/engine test",
     "dev:server": "pnpm --filter @rycon/server dev",
     "dev:client": "pnpm --filter @rycon/client dev",
+    "test:ds": "pnpm --filter @rycon/ds-system test",
     "build:client": "pnpm --filter @rycon/client build",
     "demo": "pnpm tsx packages/engine/scripts/demo.ts"
   },

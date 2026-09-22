@@ -1,0 +1,11 @@
+export { DemandSupplySystem } from './application/DemandSupplySystem.js';
+export type { DemandSupplySnapshot } from './application/DemandSupplySystem.js';
+export { InMemoryDemandSupplyStore } from './application/InMemoryDemandSupplyStore.js';
+export type { DemandProvider } from './contracts/DemandProvider.js';
+export type { FleetProvider } from './contracts/FleetProvider.js';
+export { cargoDemandSchema } from './domain/CargoDemand.js';
+export type { CargoDemand } from './domain/CargoDemand.js';
+export { vesselCapabilitySchema, vesselSupplySchema } from './domain/FleetSupply.js';
+export type { VesselCapability, VesselSupply } from './domain/FleetSupply.js';
+export { StaticDemandProvider } from './infrastructure/StaticDemandProvider.js';
+export { StaticFleetProvider } from './infrastructure/StaticFleetProvider.js';

@@ -9,6 +9,7 @@
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.1",
+    "@rycon/ds-system": "workspace:*",
     "@rycon/engine": "workspace:*",
     "fastify": "^5.0.0"
   },

@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import simulationRoutes from './routes/simulation.js';
 import networkRoutes from './routes/network.js';
 import rootRoutes from './routes/root.js';
+import dsRoutes from './routes/ds.js';
 import { simulationStream } from './websocket/SimulationStream.js';
 
 const app = Fastify({ logger: true });
@@ -14,6 +15,7 @@ await app.register(websocket);
 app.register(simulationRoutes);
 app.register(networkRoutes);
 app.register(rootRoutes);
+app.register(dsRoutes);
 
 app.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
