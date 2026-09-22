@@ -3,6 +3,7 @@ import websocket from '@fastify/websocket';
 import cors from '@fastify/cors';
 import simulationRoutes from './routes/simulation.js';
 import networkRoutes from './routes/network.js';
+import rootRoutes from './routes/root.js';
 import { simulationStream } from './websocket/SimulationStream.js';
 
 const app = Fastify({ logger: true });
@@ -12,6 +13,15 @@ await app.register(websocket);
 
 app.register(simulationRoutes);
 app.register(networkRoutes);
+app.register(rootRoutes);
+
+app.setNotFoundHandler((request, reply) => {
+  reply.code(404).send({
+    error: 'Route not found',
+    path: request.url,
+    help: '/help',
+  });
+});
 
 app.register(async function (fastify) {
   fastify.get('/ws', { websocket: true }, (connection, req) => {
