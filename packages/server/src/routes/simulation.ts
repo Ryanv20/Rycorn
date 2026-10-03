@@ -1,11 +1,54 @@
 import { FastifyInstance } from 'fastify';
+import { VesselCapability } from '@rycon/engine';
 import { simulationStream } from '../websocket/SimulationStream.js';
+import { dsStore } from '../dsStore.js';
+import { createOperationalReport } from '../reporting/OperationalReport.js';
+import { buildScenarioNetwork } from '../maritime/ScenarioNetwork.js';
+import { getSelectedScenarioPlan, setActiveScenario } from '../maritime/activeScenario.js';
+import { CLOCK_PROFILES, type ClockProfileId } from '../websocket/SimulationStream.js';
 
 export default async function simulationRoutes(fastify: FastifyInstance) {
   // Initialize — network is always built server-side from demoNetwork.ts
   fastify.post('/simulation/initialize', async (request) => {
     const body = (request.body as any) ?? {};
-    simulationStream.initialize(body);
+    dsStore.resetUnfinishedDemands();
+    const selectedPlan = getSelectedScenarioPlan();
+    const demands = body.cargoes
+      ? []
+      : dsStore.getCargoDemands().filter(demand => demand.status === 'PENDING');
+    const scenario = await buildScenarioNetwork(demands);
+    setActiveScenario(scenario);
+    simulationStream.initialize({
+      vessels: body.vessels ?? dsStore.getVesselSupply().map(vessel => ({
+        id: vessel.id,
+        capability: VesselCapability[vessel.capability],
+        startNodeId: vessel.startNodeId,
+        vesselType: vessel.vesselType,
+        deadweightTonnes: vessel.deadweightTonnes,
+        fuelCapacityTonnes: vessel.fuelCapacityTonnes,
+        fuelRemainingTonnes: vessel.fuelRemainingTonnes,
+        fuelBurnTonnesPerHour: vessel.fuelBurnTonnesPerHour,
+      })),
+      cargoes: body.cargoes ?? demands
+        .map(demand => ({
+        id: demand.requestId,
+        origin: demand.origin,
+        destination: demand.destination,
+        quantity: demand.quantity,
+        earliestDeparture: demand.earliestDeparture,
+        deadline: demand.deadline,
+        cargoType: demand.cargoType,
+      })),
+      network: scenario.network,
+      config: {
+        loadDurationHours: 2,
+        unloadDurationHours: 2,
+        bunkerPortNodeIds: ['19WPI-50000', '19WPI-16080', '19WPI-18150', '19WPI-53650', '19WPI-46850'].map(id => `node-${id}`),
+        bunkeringDurationHours: 2,
+        ...body.config,
+      },
+    });
+    simulationStream.setContinuousDemands(selectedPlan?.continuous ? demands : null);
     return { success: true, status: simulationStream.getSystemStatus() };
   });
 
@@ -25,15 +68,23 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/simulation/reset', async () => {
+    dsStore.resetUnfinishedDemands();
     simulationStream.reset();
     return { success: true };
   });
 
-  fastify.post('/simulation/speed', async (request) => {
-    const { multiplier } = (request.body as { multiplier: number });
-    if (!multiplier || multiplier <= 0) return { success: false, error: 'Invalid multiplier' };
-    simulationStream.setSpeed(multiplier);
-    return { success: true, tickIntervalMs: Math.max(10, 200 / multiplier) };
+  fastify.get('/simulation/clock-profile', async () => ({
+    active: simulationStream.getClockProfile(),
+    profiles: CLOCK_PROFILES,
+  }));
+
+  fastify.post('/simulation/clock-profile', async (request, reply) => {
+    const { profileId } = (request.body as { profileId?: ClockProfileId }) ?? {};
+    if (!profileId || !CLOCK_PROFILES.some(profile => profile.id === profileId)) {
+      return reply.code(400).send({ error: 'Choose one of the supported clock profiles' });
+    }
+    simulationStream.setClockProfile(profileId);
+    return { active: simulationStream.getClockProfile() };
   });
 
   fastify.get('/simulation/status', async (request, reply) => {
@@ -46,4 +97,6 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get('/simulation/events', async () => simulationStream.getEvents());
+  fastify.get('/simulation/time-observations', async () => simulationStream.getTimeObservations());
+  fastify.get('/simulation/report', async () => createOperationalReport());
 }

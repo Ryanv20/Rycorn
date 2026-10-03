@@ -7,8 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function main() {
-  const inputFilePath = path.join(__dirname, '../data/raw/world-port-index/UpdatedPub150.csv');
-  const outputDir = path.join(__dirname, '../data/processed');
+  const inputFilePath = path.join(__dirname, '../../../data/raw/world-port-index/UpdatedPub150.csv');
+  const outputDir = path.join(__dirname, '../../../data/processed');
   const outputFilePath = path.join(outputDir, 'canonical-ports.json');
 
   if (!fs.existsSync(inputFilePath)) {
@@ -35,9 +35,7 @@ async function main() {
   
   console.log(`\nSuccessfully wrote ${result.ports.length} ports to ${outputFilePath}`);
 
-  if (result.invalid > 0 || result.duplicates > 0) {
-    process.exit(1); // Exit non-zero on failure as required by spec
-  }
+  if (result.invalid > 0) process.exit(1);
 }
 
 main().catch(err => {

@@ -1,63 +1,15 @@
-import { randomUUID } from 'node:crypto';
-import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import {
-  InMemoryDemandSupplyStore,
-} from '@rycon/ds-system';
-
-const developmentPasskey = 'rycon-local-access';
-const passkey = process.env.DS_SYSTEM_PASSKEY ?? developmentPasskey;
-const sessions = new Set<string>();
-
-const store = new InMemoryDemandSupplyStore(
-  [{
-    requestId: 'ORDER-DEMO-001',
-    origin: 'node-PORT-ALPHA',
-    destination: 'node-PORT-BETA',
-    quantity: 100,
-    earliestDeparture: 0,
-    deadline: 48,
-    cargoType: 'GENERAL',
-  }],
-  [{ id: 'VESSEL-DEMO-001', capability: 'C', startNodeId: 'node-PORT-ALPHA' }],
-);
-
-function sessionToken(request: FastifyRequest): string | null {
-  const header = request.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return null;
-  const token = header.slice('Bearer '.length);
-  return sessions.has(token) ? token : null;
-}
-
-function requireSession(request: FastifyRequest, reply: FastifyReply): boolean {
-  if (sessionToken(request)) return true;
-  reply.code(401).send({ error: 'DS System access required' });
-  return false;
-}
+import { FastifyInstance } from 'fastify';
+import { simulationStream } from '../websocket/SimulationStream.js';
+import { dsStore as store } from '../dsStore.js';
+import { FixedScenarioGenerator } from '@rycon/ds-system';
+import { setSelectedScenarioPlan } from '../maritime/activeScenario.js';
 
 function messageFor(error: unknown): string {
   return error instanceof Error ? error.message : 'DS System request failed';
 }
 
 export default async function dsRoutes(fastify: FastifyInstance) {
-  fastify.post('/ds/auth', async (request, reply) => {
-    const body = (request.body as { passkey?: unknown } | undefined) ?? {};
-    if (body.passkey !== passkey) {
-      return reply.code(401).send({ error: 'Invalid passkey' });
-    }
-
-    const token = randomUUID();
-    sessions.add(token);
-    return { token };
-  });
-
-  fastify.post('/ds/logout', async (request, reply) => {
-    const token = sessionToken(request);
-    if (token) sessions.delete(token);
-    return reply.code(204).send();
-  });
-
-  fastify.get('/ds/status', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+  fastify.get('/ds/status', async () => {
     const demands = store.getCargoDemands();
     const vessels = store.getVesselSupply();
     return {
@@ -69,28 +21,66 @@ export default async function dsRoutes(fastify: FastifyInstance) {
     };
   });
 
-  fastify.get('/ds/demands', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+  fastify.get('/ds/scenarios', async () => new FixedScenarioGenerator().list());
+
+  fastify.get('/ds/scenario', async request => {
+    const { scenarioId } = request.query as { scenarioId?: string };
+    return new FixedScenarioGenerator().generate({ fleetCount: store.getVesselSupply().length, scenarioId });
+  });
+
+  fastify.post('/ds/scenario/apply', async (request, reply) => {
+    const { scenarioId } = (request.body as { scenarioId?: string }) ?? {};
+    const scenario = new FixedScenarioGenerator().generate({ fleetCount: store.getVesselSupply().length, scenarioId });
+    try {
+      store.replaceScenarioDemands(scenario.cargoDemands);
+    } catch (error) {
+      return reply.code(409).send({ error: messageFor(error) });
+    }
+    setSelectedScenarioPlan(scenario);
+    return { scenarioId: scenario.id, demandCount: scenario.cargoDemands.length };
+  });
+
+  fastify.get('/ds/demands', async () => {
     return { demands: store.getCargoDemands() };
   });
 
   fastify.post('/ds/demands', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
     try {
       const demand = store.addDemand(request.body);
-      return reply.code(201).send({ demand });
+      const handedToSimulation = simulationStream.addDemand(demand);
+      return reply.code(201).send({ demand, handedToSimulation });
     } catch (error) {
       return reply.code(400).send({ error: messageFor(error) });
     }
   });
 
-  fastify.get('/ds/supply', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+  fastify.patch('/ds/demands/:requestId', async (request, reply) => {
+    const { requestId } = request.params as { requestId: string };
+    try {
+      const demand = store.updateDemand(requestId, request.body as Record<string, unknown>);
+      const updatedInSimulation = simulationStream.updateDemand(demand);
+      return { demand, updatedInSimulation };
+    } catch (error) {
+      return reply.code(400).send({ error: messageFor(error) });
+    }
+  });
+
+  fastify.delete('/ds/demands/:requestId', async (request, reply) => {
+    const { requestId } = request.params as { requestId: string };
+    try {
+      const demand = store.cancelDemand(requestId);
+      const cancelledInSimulation = simulationStream.cancelDemand(requestId);
+      return { demand, cancelledInSimulation };
+    } catch (error) {
+      return reply.code(400).send({ error: messageFor(error) });
+    }
+  });
+
+  fastify.get('/ds/supply', async () => {
     return { vessels: store.getVesselSupply() };
   });
 
   fastify.post('/ds/supply', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
     try {
       const vessel = store.addVessel(request.body);
       return reply.code(201).send({ vessel });
@@ -100,13 +90,11 @@ export default async function dsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/ds/snapshots', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
     const snapshot = await store.createSnapshot();
     return reply.code(201).send({ snapshot });
   });
 
-  fastify.get('/ds/snapshots/latest', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+  fastify.get('/ds/snapshots/latest', async () => {
     return { snapshot: store.getLatestSnapshot() };
   });
 }

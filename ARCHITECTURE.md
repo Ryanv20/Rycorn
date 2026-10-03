@@ -573,27 +573,35 @@ No module becomes a dumping ground for unrelated logic.
 
 ## Current Position
 
+The repository has advanced beyond the original pre-implementation roadmap. The current workspace boundaries are:
+
 ```text
-[x] PHASE 0 — RYCON_SPEC.md written
-[x] PHASE 0 — ARCHITECTURE.md written
-[ ] PHASE 0 — README.md
-[ ] PHASE 0 — Repository skeleton
-[ ] PHASE 1 — Raw data ingestion
-[ ] PHASE 2 — Canonical port schema
-...
+DS_System/          Demand/supply contracts, validation, in-memory store
+packages/engine/    Maritime graph, routing, movement, event simulation
+packages/server/    Composition root, API/WebSocket adapters, reports
+packages/client/    Operator console, map, event history, report exports
+data/raw/           Immutable source data and provenance
 ```
 
-**Next immediate steps:**
+From the workspace root, `pnpm rycorn` starts the local API and client together.
 
-1. `README.md`
-2. Repository skeleton (`src/`, `data/`, `tests/`, `scripts/`, `config/`, `docs/`)
-3. Raw data placement and provenance documentation
-4. WPI parser
-5. Natural Earth loader
-6. Canonical port schema
-7. Tests: source → canonical transformation
+`DS_System` does not import the engine. The server adapts DS demand records into engine cargo definitions, supplies the fleet, and maps Rycon assignment/transit/delivery events back into DS lifecycle states. Requests can be edited or cancelled while pending; after assignment their execution state is controlled by Rycon.
 
-**No simulation code until Phase 5.**
+### Time and reporting
+
+- `simulationTime` is elapsed modeled hours from `T+0`, advanced in event-queue order. It is not a date on the host calendar.
+- `d` is the sum of `distanceKm` on the selected network edges. The router chooses the path; movement uses the configured nominal speed profile to calculate travel duration. Loading, unloading, and configured delay modifiers contribute additional modeled hours.
+- `observedAtUtc` is sampled from the server host clock via `Date.now()` when an event/state is processed or published. It is provenance metadata and does not change event ordering or the modeled clock.
+- `/simulation/report` combines DS demand, current cargo/vessel state, route and distance metadata, events, time observations, and system errors. The client refreshes it live and exports JSON/CSV or uses browser print-to-PDF.
+
+### Audit findings and next work
+
+- The current router checks graph connectivity and vessel capability. It does not test whether an edge crosses land.
+- `data/raw/natural-earth/` currently contains provenance documentation but no coastline geometry. Land avoidance should wait until a versioned coastline dataset is added and its coordinate assumptions are validated.
+- Movement and port handling remain deterministic approximations. Realistic calibration requires sourced vessel-speed and port-operation data; the clock metadata is not a substitute for that model.
+- Display scale, marker size, and label density belong to the client and must not alter physical distance or simulation time.
+
+The practical next sequence is coastline ingestion/edge validation, sourced movement calibration, then any modeled calendar anchor needed for operational dates. Continue to keep observed host time and simulated time distinct.
 
 ---
 

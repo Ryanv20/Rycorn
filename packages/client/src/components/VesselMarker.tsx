@@ -2,7 +2,13 @@ import { DivIcon } from 'leaflet';
 import { useEffect, useRef, useState } from 'react';
 import { Marker, Popup } from 'react-leaflet';
 
-export default function VesselMarker({ vessel, nodes, vesselIndex }: { vessel: any; nodes: any[]; vesselIndex: number }) {
+export default function VesselMarker({ vessel, nodes, vesselIndex, selected, onSelect }: {
+  vessel: any;
+  nodes: any[];
+  vesselIndex: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   const getCoordinates = (node: any): [number, number] | null => {
     if (!node) return null;
     const latitude = node.position?.latitude ?? node.latitude;
@@ -80,16 +86,17 @@ export default function VesselMarker({ vessel, nodes, vesselIndex }: { vessel: a
   const displayPosition: [number, number] = [position[0] + offset * 0.18, position[1] + offset * 0.22];
 
   const icon = new DivIcon({
-    className: 'ship-avatar',
-    html: `<span class="ship-symbol" title="${vessel.vesselId}"><i class="ship-wake"></i><i class="ship-hull"></i><i class="ship-cabin"></i></span>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
+    className: `ship-avatar ${selected ? 'is-selected' : ''}`,
+    html: `<span class="ship-symbol" title="${vessel.vesselId}"><span class="ship-heading">➤</span></span>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
   });
 
   return (
     <Marker
       position={displayPosition}
       icon={icon}
+      eventHandlers={{ click: onSelect }}
     >
       <Popup>
         <strong>{vessel.vesselId}</strong><br/>

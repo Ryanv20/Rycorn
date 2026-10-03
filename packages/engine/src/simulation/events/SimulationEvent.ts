@@ -7,7 +7,8 @@ export type EventType =
   | 'WAITING_FOR_BERTH'
   | 'UNLOAD_STARTED'
   | 'UNLOAD_COMPLETED'
-  | 'SHIP_AVAILABLE';
+  | 'SHIP_AVAILABLE'
+  | 'BUNKERING_COMPLETED';
 
 export interface SimulationEvent {
   readonly eventId: string;

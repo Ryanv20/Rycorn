@@ -15,6 +15,11 @@ export interface VesselDefinition {
   id: string;
   capability: VesselCapability;
   startNodeId: string;
+  vesselType?: string;
+  deadweightTonnes?: number;
+  fuelCapacityTonnes?: number;
+  fuelRemainingTonnes?: number;
+  fuelBurnTonnesPerHour?: number;
 }
 
 export interface CargoDefinition {
@@ -22,6 +27,9 @@ export interface CargoDefinition {
   origin: string;
   destination: string;
   quantity?: number;
+  earliestDeparture?: number;
+  deadline?: number;
+  cargoType?: string;
 }
 
 export interface SimulationInput {
@@ -44,6 +52,8 @@ export class SimulationEngine {
   private context = new SimulationContext();
   private events: SimulationEvent[] = [];
   private processor!: EventProcessor;
+  private initialized = false;
+  private demandEventCounter = 0;
   
   initialize(input: SimulationInput): void {
     const config = input.config || { loadDurationHours: 2, unloadDurationHours: 2 };
@@ -52,11 +62,17 @@ export class SimulationEngine {
     
     this.processor = new EventProcessor(this.context, this.queue, router, movement, config);
     this.clock.reset();
+    this.initialized = true;
     
     for (const v of input.vessels) {
       this.context.vessels.set(v.id, {
         vesselId: v.id,
         vesselCapability: v.capability,
+        vesselType: v.vesselType ?? 'GENERAL_CARGO',
+        deadweightTonnes: v.deadweightTonnes ?? 12000,
+        fuelCapacityTonnes: v.fuelCapacityTonnes ?? 1200,
+        fuelRemainingTonnes: v.fuelRemainingTonnes ?? 900,
+        fuelBurnTonnesPerHour: v.fuelBurnTonnesPerHour ?? 0.12,
         status: 'IDLE',
         currentNodeId: v.startNodeId,
         assignedCargoIds: []
@@ -69,7 +85,10 @@ export class SimulationEngine {
         originNodeId: c.origin,
         destinationNodeId: c.destination,
         status: 'CREATED',
-        quantity: c.quantity || 100 // fallback
+        quantity: c.quantity || 100,
+        earliestDeparture: c.earliestDeparture ?? 0,
+        deadline: c.deadline,
+        cargoType: c.cargoType ?? 'GENERAL',
       });
     }
     
@@ -83,6 +102,49 @@ export class SimulationEngine {
         metadata: {}
       });
     }
+
+    for (const cargo of input.cargoes) this.scheduleAvailableVessels(cargo);
+  }
+
+  addCargo(cargo: CargoDefinition): void {
+    if (!this.initialized) throw new Error('Engine must be initialized before adding cargo');
+    if (this.context.cargoes.has(cargo.id)) throw new Error(`Cargo ${cargo.id} already exists`);
+    this.context.cargoes.set(cargo.id, {
+      cargoId: cargo.id,
+      originNodeId: cargo.origin,
+      destinationNodeId: cargo.destination,
+      status: 'CREATED',
+      quantity: cargo.quantity ?? 100,
+      earliestDeparture: cargo.earliestDeparture ?? this.clock.getTime(),
+      deadline: cargo.deadline,
+      cargoType: cargo.cargoType ?? 'GENERAL',
+    });
+    this.scheduleAvailableVessels(cargo);
+  }
+
+  updateCargo(cargoId: string, updates: Partial<Omit<CargoDefinition, 'id'>>): void {
+    const cargo = this.context.getCargo(cargoId);
+    if (cargo.status !== 'CREATED') throw new Error(`Cargo ${cargoId} can only be edited before assignment`);
+    this.context.updateCargo(cargoId, {
+      originNodeId: updates.origin ?? cargo.originNodeId,
+      destinationNodeId: updates.destination ?? cargo.destinationNodeId,
+      quantity: updates.quantity ?? cargo.quantity,
+      earliestDeparture: updates.earliestDeparture ?? cargo.earliestDeparture,
+      deadline: updates.deadline ?? cargo.deadline,
+      cargoType: updates.cargoType ?? cargo.cargoType,
+    });
+    this.scheduleAvailableVessels({
+      id: cargoId,
+      origin: updates.origin ?? cargo.originNodeId,
+      destination: updates.destination ?? cargo.destinationNodeId,
+      earliestDeparture: updates.earliestDeparture ?? cargo.earliestDeparture,
+    });
+  }
+
+  cancelCargo(cargoId: string): void {
+    const cargo = this.context.getCargo(cargoId);
+    if (cargo.status !== 'CREATED') throw new Error(`Cargo ${cargoId} can only be cancelled before assignment`);
+    this.context.updateCargo(cargoId, { status: 'CANCELLED' });
   }
 
   run(): SimulationResult {
@@ -116,5 +178,34 @@ export class SimulationEngine {
 
   getEvents(): SimulationEvent[] {
     return this.events;
+  }
+
+  getCurrentSimulationTime(): number {
+    return this.clock.getTime();
+  }
+
+  getNextEventTime(): number | undefined {
+    return this.queue.peek()?.simulationTime;
+  }
+
+  private scheduleAvailableVessels(cargo: CargoDefinition): void {
+    const earliestDeparture = Math.max(
+      this.clock.getTime(),
+      cargo.earliestDeparture ?? this.clock.getTime(),
+    );
+    for (const vessel of this.context.vessels.values()) {
+      if (vessel.status !== 'IDLE' || vessel.currentNodeId !== cargo.origin) continue;
+      const queuedAvailability = this.queue.nextTime('SHIP_AVAILABLE', vessel.vesselId);
+      if (queuedAvailability !== undefined && queuedAvailability <= earliestDeparture) continue;
+      if (queuedAvailability !== undefined) this.queue.remove('SHIP_AVAILABLE', vessel.vesselId);
+      this.queue.enqueue({
+        eventId: `demand-${++this.demandEventCounter}-${vessel.vesselId}`,
+        simulationTime: earliestDeparture,
+        eventType: 'SHIP_AVAILABLE',
+        entityId: vessel.vesselId,
+        locationNodeId: cargo.origin,
+        metadata: {},
+      });
+    }
   }
 }

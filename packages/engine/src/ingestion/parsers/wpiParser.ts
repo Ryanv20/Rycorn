@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { parse } from 'csv-parse';
 import { wpiRecordSchema, WorldPortIndexRecord } from '../validators/wpiValidator';
 import { normalizePort } from '../normalizers/portNormalizer';
+import { normalizePortSourceId } from '../ids/generatePortId';
 import { CanonicalPort } from '../../domain/ports/CanonicalPort';
 
 export interface ProcessResult {
@@ -23,7 +24,7 @@ export async function parseWpiFile(filePath: string): Promise<ProcessResult> {
     ports: [],
   };
 
-  const seenIds = new Set<string>();
+  const seenIds = new Map<string, Array<{ record: WorldPortIndexRecord; portIndex: number }>>();
   const parser = fs.createReadStream(filePath).pipe(
     parse({
       columns: true,
@@ -43,19 +44,37 @@ export async function parseWpiFile(filePath: string): Promise<ProcessResult> {
     }
 
     const validRecord = validationResult.data;
-    const sourceId = validRecord['World Port Index Number'];
+    const sourceId = normalizePortSourceId(validRecord['World Port Index Number']);
+    const previousPorts = seenIds.get(sourceId) ?? [];
+    const sameLocation = previousPorts.find(({ record }) =>
+      Math.abs(record.Latitude - validRecord.Latitude) < 0.00001 &&
+      Math.abs(record.Longitude - validRecord.Longitude) < 0.00001
+    );
 
-    if (seenIds.has(sourceId)) {
+    if (sameLocation) {
       result.duplicates++;
-      console.error(`World Port Index record ${result.recordsRead}: duplicate source ID '${sourceId}'`);
+      result.warnings++;
+      console.warn(`World Port Index record ${result.recordsRead}: repeated source ID '${sourceId}' at the same coordinates; duplicate entry skipped`);
       continue;
     }
 
-    seenIds.add(sourceId);
+    if (previousPorts.length > 0) {
+      result.warnings++;
+      console.warn(`World Port Index record ${result.recordsRead}: source ID '${sourceId}' is reused at a distinct location; assigning qualified canonical IDs`);
+      for (const previous of previousPorts) {
+        result.ports[previous.portIndex] = normalizePort(previous.record, `${previous.record['Main Port Name']}-${previous.record.Latitude.toFixed(5)}-${previous.record.Longitude.toFixed(5)}`);
+      }
+    }
     
     try {
-      const canonicalPort = normalizePort(validRecord);
+      const qualifier = previousPorts.length > 0
+        ? `${validRecord['Main Port Name']}-${validRecord.Latitude.toFixed(5)}-${validRecord.Longitude.toFixed(5)}`
+        : undefined;
+      const canonicalPort = normalizePort(validRecord, qualifier);
+      const portIndex = result.ports.length;
       result.ports.push(canonicalPort);
+      previousPorts.push({ record: validRecord, portIndex });
+      seenIds.set(sourceId, previousPorts);
       result.valid++;
     } catch (e: any) {
       result.invalid++;

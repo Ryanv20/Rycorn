@@ -1,4 +1,4 @@
-export type CargoStatus = 'CREATED' | 'ASSIGNED' | 'IN_TRANSIT' | 'DELIVERED';
+export type CargoStatus = 'CREATED' | 'ASSIGNED' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
 
 export interface CargoState {
   cargoId: string;
@@ -7,4 +7,7 @@ export interface CargoState {
   assignedVesselId?: string;
   status: CargoStatus;
   quantity: number;
+  earliestDeparture?: number;
+  deadline?: number;
+  cargoType?: string;
 }

@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+export const demandStatusSchema = z.enum([
+  'PENDING',
+  'ASSIGNED',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'CANCELLED',
+  'FAILED',
+]);
+
 export const cargoDemandSchema = z.object({
   requestId: z.string().min(1),
   origin: z.string().min(1),
@@ -8,6 +17,8 @@ export const cargoDemandSchema = z.object({
   earliestDeparture: z.number().nonnegative(),
   deadline: z.number().positive(),
   cargoType: z.string().min(1).default('GENERAL'),
+  status: demandStatusSchema.default('PENDING'),
 });
 
 export type CargoDemand = z.infer<typeof cargoDemandSchema>;
+export type DemandStatus = z.infer<typeof demandStatusSchema>;

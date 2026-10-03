@@ -66,6 +66,9 @@ export class EventProcessor {
       case 'SHIP_AVAILABLE':
         this.handleShipAvailable(event);
         break;
+      case 'BUNKERING_COMPLETED':
+        this.handleBunkeringCompleted(event);
+        break;
     }
   }
 
@@ -143,7 +146,11 @@ export class EventProcessor {
       eventType: 'DEPARTED',
       entityId: vessel.vesselId,
       locationNodeId: event.locationNodeId,
-      metadata: event.metadata
+      metadata: {
+        ...event.metadata,
+        routeNodeIds: route.path,
+        distanceKm: route.totalDistanceKm,
+      }
     });
   }
 
@@ -155,6 +162,12 @@ export class EventProcessor {
     this.portCapacityPolicy.vesselDeparted(event.locationNodeId);
 
     const estimate = this.movement.calculate(route, vessel.vesselCapability, event.simulationTime);
+    const fuelBurnTonnes = estimate.durationHours * (vessel.fuelBurnTonnesPerHour ?? 0);
+    const fuelRemainingTonnes = vessel.fuelRemainingTonnes ?? Infinity;
+    if (fuelRemainingTonnes < fuelBurnTonnes) {
+      throw new Error(`Vessel ${vessel.vesselId} requires ${fuelBurnTonnes.toFixed(1)} t fuel but has ${fuelRemainingTonnes.toFixed(1)} t`);
+    }
+    this.context.updateVessel(vessel.vesselId, { fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes });
     
     this.queue.enqueue({
       eventId: this.createEventId(),
@@ -162,7 +175,7 @@ export class EventProcessor {
       eventType: 'ARRIVED',
       entityId: vessel.vesselId,
       locationNodeId: route.path[route.path.length - 1],
-      metadata: event.metadata
+      metadata: { ...event.metadata, fuelBurnTonnes, fuelRemainingAfterDepartureTonnes: fuelRemainingTonnes - fuelBurnTonnes }
     });
   }
 
@@ -264,14 +277,32 @@ export class EventProcessor {
 
   private handleShipAvailable(event: SimulationEvent) {
     const vessel = this.context.getVessel(event.entityId);
-    
-    let currentLoad = 0; // if it supports multiple cargoes, we need to track load. But currently it unloads everything.
+    if (this.config.bunkerPortNodeIds?.includes(vessel.currentNodeId)
+      && (vessel.fuelRemainingTonnes ?? Infinity) < (vessel.fuelCapacityTonnes ?? Infinity) * 0.75) {
+      this.queue.enqueue({
+        eventId: this.createEventId(),
+        simulationTime: event.simulationTime + (this.config.bunkeringDurationHours ?? 2),
+        eventType: 'BUNKERING_COMPLETED',
+        entityId: vessel.vesselId,
+        locationNodeId: vessel.currentNodeId,
+        metadata: {
+          refuelledTonnes: (vessel.fuelCapacityTonnes ?? 0) - (vessel.fuelRemainingTonnes ?? 0),
+        },
+      });
+      return;
+    }
+    let nextCargoTime = Infinity;
 
     for (const cargo of this.context.cargoes.values()) {
       if (cargo.status === 'CREATED' && cargo.originNodeId === vessel.currentNodeId) {
-        if (!this.cargoCompatibilityPolicy.isCompatible('GENERAL', vessel.vesselCapability)) continue;
+        const earliestDeparture = cargo.earliestDeparture ?? 0;
+        if (earliestDeparture > event.simulationTime) {
+          nextCargoTime = Math.min(nextCargoTime, earliestDeparture);
+          continue;
+        }
+        if (!this.cargoCompatibilityPolicy.isCompatible(cargo.cargoType ?? 'GENERAL', vessel.vesselCapability)) continue;
         
-        if (this.capacityPolicy.canAccept(vessel.vesselCapability, currentLoad, cargo.quantity || 100)) {
+        if (this.capacityPolicy.canAccept(vessel.vesselCapability, 0, cargo.quantity || 100)) {
           this.queue.enqueue({
             eventId: this.createEventId(),
             simulationTime: event.simulationTime,
@@ -280,9 +311,36 @@ export class EventProcessor {
             locationNodeId: vessel.currentNodeId,
             metadata: { cargoIds: [cargo.cargoId] }
           });
-          break; // assign one at a time
+          return;
         }
       }
     }
+
+    const queuedAvailability = this.queue.nextTime('SHIP_AVAILABLE', vessel.vesselId);
+    if (Number.isFinite(nextCargoTime) && (queuedAvailability === undefined || nextCargoTime < queuedAvailability)) {
+      if (queuedAvailability !== undefined) this.queue.remove('SHIP_AVAILABLE', vessel.vesselId);
+      this.queue.enqueue({
+        eventId: this.createEventId(),
+        simulationTime: nextCargoTime,
+        eventType: 'SHIP_AVAILABLE',
+        entityId: vessel.vesselId,
+        locationNodeId: vessel.currentNodeId,
+        metadata: {},
+      });
+    }
+  }
+
+  private handleBunkeringCompleted(event: SimulationEvent): void {
+    const vessel = this.context.getVessel(event.entityId);
+    const fuelCapacityTonnes = vessel.fuelCapacityTonnes ?? 0;
+    this.context.updateVessel(vessel.vesselId, { fuelRemainingTonnes: fuelCapacityTonnes });
+    this.queue.enqueue({
+      eventId: this.createEventId(),
+      simulationTime: event.simulationTime,
+      eventType: 'SHIP_AVAILABLE',
+      entityId: vessel.vesselId,
+      locationNodeId: event.locationNodeId,
+      metadata: { bunkeringComplete: true },
+    });
   }
 }

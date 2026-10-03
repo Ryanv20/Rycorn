@@ -26,9 +26,11 @@ describe('Demand Flow Integration', () => {
 
     const edges = new Map<any, any>();
     edges.set('e1', { id: 'e1', fromNodeId: 'nodeA', toNodeId: 'nodeB', distanceKm: 10, minimumVesselCapability: 'A' });
+    edges.set('e2', { id: 'e2', fromNodeId: 'nodeB', toNodeId: 'nodeA', distanceKm: 10, minimumVesselCapability: 'A' });
 
     const adjacency = new Map<any, any>();
     adjacency.set('nodeA', ['e1']);
+    adjacency.set('nodeB', ['e2']);
 
     const network = new MaritimeNetwork(nodes, edges, adjacency);
 
@@ -51,5 +53,17 @@ describe('Demand Flow Integration', () => {
     
     expect(cargoState).toBeDefined();
     expect(cargoState?.status).toBe('DELIVERED');
+
+    engine.addCargo({
+      id: 'dynamic-cargo-2',
+      origin: 'nodeB',
+      destination: 'nodeA',
+      quantity: 50,
+      earliestDeparture: result.totalSimulatedHours + 12,
+      deadline: 200,
+      cargoType: 'GENERAL',
+    });
+    engine.run();
+    expect(engine.getState().getCargo('dynamic-cargo-2').status).toBe('DELIVERED');
   });
 });

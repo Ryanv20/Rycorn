@@ -12,6 +12,11 @@ export type VesselStatus =
 export interface VesselState {
   vesselId: string;
   vesselCapability: VesselCapability;
+  vesselType?: string;
+  deadweightTonnes?: number;
+  fuelCapacityTonnes?: number;
+  fuelRemainingTonnes?: number;
+  fuelBurnTonnesPerHour?: number;
   status: VesselStatus;
   currentNodeId: string;
   assignedCargoIds: string[];

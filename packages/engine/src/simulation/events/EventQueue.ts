@@ -1,4 +1,4 @@
-import { SimulationEvent } from './SimulationEvent';
+import { SimulationEvent, type EventType } from './SimulationEvent';
 
 export class EventQueue {
   private events: SimulationEvent[] = [];
@@ -27,5 +27,14 @@ export class EventQueue {
 
   size(): number {
     return this.events.length;
+  }
+
+  nextTime(eventType: EventType, entityId: string): number | undefined {
+    const event = this.events.find(candidate => candidate.eventType === eventType && candidate.entityId === entityId);
+    return event?.simulationTime;
+  }
+
+  remove(eventType: EventType, entityId: string): void {
+    this.events = this.events.filter(event => event.eventType !== eventType || event.entityId !== entityId);
   }
 }

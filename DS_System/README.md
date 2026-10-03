@@ -9,6 +9,7 @@ world that tells Rycon what needs to move and what transport is available.
 - Describe available vessel supply from a fleet owner or fleet service.
 - Validate and expose neutral contracts that another system can consume.
 - Return a demand/supply snapshot without knowing how simulation works.
+- Track pending, assigned, in-transit, delivered, cancelled, and failed demand states.
 
 ## Boundaries
 
@@ -25,7 +26,9 @@ an API, database, message queue, or file without changing the contracts.
 The package does not decide routes, assign vessels, run the simulation, or
 render a dashboard.
 
-The operator console is served by the application server. Set
-`DS_SYSTEM_PASSKEY` before starting the server to choose its access passkey.
-Without that variable, development uses `rycon-local-access`; configure an
-explicit value before using the server outside local development.
+Demand fields may be edited or cancelled while their status is `PENDING`.
+Execution statuses are written back by the server from Rycon simulation events.
+
+The operator console is served by the application server. The local development
+API has no login gate and binds to `127.0.0.1`; do not expose it outside the
+local machine without adding an appropriate access-control layer.

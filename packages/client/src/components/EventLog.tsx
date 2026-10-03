@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Activity, Anchor, CircleAlert, Navigation, Package, Ship } from 'lucide-react';
 
 type Category = 'Main' | 'Ship Log' | 'Cargo Log' | 'Route Log' | 'Alerts' | 'All Events';
 const categories: Category[] = ['Main', 'Ship Log', 'Cargo Log', 'Route Log', 'Alerts', 'All Events'];
@@ -12,36 +13,33 @@ function matchesCategory(event: any, category: Category): boolean {
   return event.eventType === 'DEPARTED' || event.eventType === 'ARRIVED' || event.eventType === 'WAITING_FOR_BERTH';
 }
 
-export default function EventLog({ events, open, onToggle }: { events: any[]; open: boolean; onToggle: () => void }) {
+function EventIcon({ eventType }: { eventType: string }) {
+  if (eventType === 'DEPARTED' || eventType === 'ARRIVED') return <Navigation size={15} />;
+  if (eventType.includes('LOAD') || eventType.includes('UNLOAD')) return <Package size={15} />;
+  if (eventType === 'WAITING_FOR_BERTH') return <CircleAlert size={15} />;
+  if (eventType.startsWith('SHIP_')) return <Ship size={15} />;
+  if (eventType === 'SHIP_AVAILABLE') return <Anchor size={15} />;
+  return <Activity size={15} />;
+}
+
+export default function EventLog({ events, compact = false }: { events: any[]; compact?: boolean }) {
   const [category, setCategory] = useState<Category>('Main');
   const visibleEvents = events.filter(event => matchesCategory(event, category));
 
   return (
-    <div style={{ padding: open ? 10 : '10px 6px', overflowY: open ? 'auto' : 'hidden', flex: 1 }}>
-      <button onClick={onToggle} aria-expanded={open} style={{ width: '100%', textAlign: 'left', border: 0, background: 'transparent', cursor: 'pointer', padding: 0 }}>
-        <h3 style={{ margin: 0 }}>{open ? 'Event Log' : '» Event Log'}</h3>
-      </button>
-      {open && <>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '10px 0' }}>
-          {categories.map(item => (
-            <button key={item} onClick={() => setCategory(item)} style={{ padding: '4px 6px', border: '1px solid #ccc', background: item === category ? '#dbeafe' : '#fff', cursor: 'pointer', fontSize: 11 }}>
-              {item} ({events.filter(event => matchesCategory(event, item)).length})
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {visibleEvents.map((event, index) => (
-          <div key={`${event.eventId ?? event.entityId}-${index}`} style={{ borderBottom: '1px solid #eee', paddingBottom: 5 }}>
-            <span style={{ color: '#666' }}>T+{event.simulationTime.toFixed(2)}h</span>
-            <strong style={{ marginLeft: 10 }}>{event.eventType}</strong>
-            <div style={{ fontSize: '0.9em', color: '#444' }}>
-              Entity: {event.entityId} | Loc: {event.locationNodeId}
-            </div>
-          </div>
-        ))}
-        {visibleEvents.length === 0 && <span style={{ color: '#777' }}>No events in this category</span>}
-        </div>
-      </>}
-    </div>
+    <section className={`event-log ${compact ? 'is-compact' : ''}`}>
+      <header className="event-log-heading"><div><p className="eyebrow">LOGBOOK</p><h3>{compact ? 'Recent activity' : 'Event history'}</h3></div><span>{visibleEvents.length}</span></header>
+      <div className="event-filters" role="tablist" aria-label="Filter events">
+        {categories.map(item => <button key={item} role="tab" aria-selected={item === category} className={item === category ? 'is-active' : ''} onClick={() => setCategory(item)}>{item}</button>)}
+      </div>
+      <ol className="event-list">
+        {visibleEvents.map((event, index) => <li key={`${event.eventId ?? event.entityId}-${index}`}>
+          <span className={`event-icon event-${event.eventType.toLowerCase()}`}><EventIcon eventType={event.eventType} /></span>
+          <div className="event-copy"><strong>{event.eventType.replaceAll('_', ' ')}</strong><small>{event.entityId} · {event.locationNodeId}</small></div>
+          <time>T+{Number(event.simulationTime).toFixed(2)}h</time>
+        </li>)}
+        {visibleEvents.length === 0 && <li className="event-empty">No events in this category yet.</li>}
+      </ol>
+    </section>
   );
 }

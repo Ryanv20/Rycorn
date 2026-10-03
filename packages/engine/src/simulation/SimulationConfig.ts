@@ -13,4 +13,6 @@ export interface SimulationConfig {
   vesselCapacity?: VesselCapacityConfig;
   movementModifier?: MovementModifier;
   portDelayModifier?: PortDelayModifier;
+  bunkerPortNodeIds?: string[];
+  bunkeringDurationHours?: number;
 }

@@ -19,4 +19,15 @@ describe('EventQueue', () => {
     const e3 = queue.dequeue()!;
     expect(e3.eventId).toBe('1');
   });
+
+  it('finds and replaces a vessel availability event without keeping stale wake-ups', () => {
+    const queue = new EventQueue();
+    queue.enqueue({ eventId: 'future', simulationTime: 20, eventType: 'SHIP_AVAILABLE', entityId: 'v1', locationNodeId: 'n1', metadata: {} });
+    expect(queue.nextTime('SHIP_AVAILABLE', 'v1')).toBe(20);
+    queue.remove('SHIP_AVAILABLE', 'v1');
+    queue.enqueue({ eventId: 'earlier', simulationTime: 10, eventType: 'SHIP_AVAILABLE', entityId: 'v1', locationNodeId: 'n1', metadata: {} });
+    expect(queue.nextTime('SHIP_AVAILABLE', 'v1')).toBe(10);
+    expect(queue.dequeue()?.eventId).toBe('earlier');
+    expect(queue.nextTime('SHIP_AVAILABLE', 'v1')).toBeUndefined();
+  });
 });

@@ -9,7 +9,7 @@ import { simulationStream } from './websocket/SimulationStream.js';
 
 const app = Fastify({ logger: true });
 
-await app.register(cors);
+await app.register(cors, { origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] });
 await app.register(websocket);
 
 app.register(simulationRoutes);
@@ -32,7 +32,7 @@ app.register(async function (fastify) {
 });
 
 try {
-  await app.listen({ port: 3000, host: '0.0.0.0' });
+  await app.listen({ port: 3000, host: '127.0.0.1' });
   console.log('Server listening on http://localhost:3000');
 } catch (err) {
   app.log.error(err);
