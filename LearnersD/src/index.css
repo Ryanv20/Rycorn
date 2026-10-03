@@ -24,7 +24,7 @@
   --radius: 12px;
   --radius-sm: 8px;
   --font: 'Inter', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', monospace;
+  --mono: 'JetBrains Mono', 'Fira Code', monospace;
   --sidebar-w: 280px;
 }
 
@@ -38,10 +38,7 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
+a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -49,7 +46,20 @@ a:hover { text-decoration: underline; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* Utility classes */
+/* Fade-in animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.3s ease both; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.25s ease both; }
+
+/* Badges */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -61,24 +71,12 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.badge-blue  { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.3); }
-.badge-green { background: rgba(16,185,129,.15); color: #34d399; border: 1px solid rgba(16,185,129,.3); }
-.badge-amber { background: rgba(245,158,11,.15);  color: #fbbf24; border: 1px solid rgba(245,158,11,.3); }
-.badge-pink  { background: rgba(236,72,153,.15);  color: #f472b6; border: 1px solid rgba(236,72,153,.3); }
-.badge-indigo{ background: rgba(99,102,241,.15);  color: #818cf8; border: 1px solid rgba(99,102,241,.3); }
-
-.callout {
-  padding: 14px 18px;
-  border-radius: var(--radius-sm);
-  border-left: 3px solid;
-  margin: 1.5rem 0;
-  font-size: 14px;
-  line-height: 1.7;
-}
-.callout-info    { background: rgba(59,130,246,.08);  border-color: var(--accent);  color: var(--text-dim); }
-.callout-success { background: rgba(16,185,129,.08);  border-color: var(--accent3); color: var(--text-dim); }
-.callout-warning { background: rgba(245,158,11,.08);  border-color: var(--accent4); color: var(--text-dim); }
-.callout-tip     { background: rgba(99,102,241,.08);  border-color: var(--accent2); color: var(--text-dim); }
+.badge-blue   { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.3); }
+.badge-green  { background: rgba(16,185,129,.15); color: #34d399; border: 1px solid rgba(16,185,129,.3); }
+.badge-amber  { background: rgba(245,158,11,.15); color: #fbbf24; border: 1px solid rgba(245,158,11,.3); }
+.badge-pink   { background: rgba(236,72,153,.15); color: #f472b6; border: 1px solid rgba(236,72,153,.3); }
+.badge-indigo { background: rgba(99,102,241,.15); color: #818cf8; border: 1px solid rgba(99,102,241,.3); }
+.badge-teal   { background: rgba(20,184,166,.15); color: #2dd4bf; border: 1px solid rgba(20,184,166,.3); }
 
 code {
   font-family: var(--mono);
@@ -88,3 +86,12 @@ code {
   border-radius: 4px;
   color: #93c5fd;
 }
+
+strong { color: var(--text); font-weight: 600; }
+
+/* Syntax highlight classes (used in CodeBlock) */
+.hl-keyword { color: #ff7b72; }
+.hl-string  { color: #a5d6ff; }
+.hl-comment { color: #6a737d; font-style: italic; }
+.hl-number  { color: #79c0ff; }
+.hl-type    { color: #ffa657; }

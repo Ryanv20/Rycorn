@@ -1,0 +1,133 @@
+.page {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 40px 32px 64px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+  line-height: 1.6;
+}
+
+.searchBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 14px;
+  margin-bottom: 32px;
+  transition: border-color .2s;
+}
+
+.searchBar:focus-within {
+  border-color: rgba(59,130,246,.5);
+}
+
+.searchIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: var(--text);
+  padding: 13px 0;
+  font-family: var(--font);
+}
+
+.searchInput::placeholder { color: var(--text-muted); }
+
+.resultCount {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.group {
+  margin-bottom: 28px;
+}
+
+.letterHeading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.termList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.termCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  transition: border-color .15s;
+}
+
+.termCard:hover {
+  border-color: rgba(59,130,246,.3);
+}
+
+.termHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.term {
+  font-size: 13px;
+  font-weight: 700;
+  color: #93c5fd;
+  background: rgba(59,130,246,.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.source {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.source:hover { color: var(--text-dim); }
+
+.definition {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
