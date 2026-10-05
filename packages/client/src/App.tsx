@@ -11,6 +11,7 @@ import NextStopPage from './components/NextStopPage';
 import ClockPage from './components/ClockPage';
 import SpecialClassPage from './components/SpecialClassPage';
 import type { SpecialVesselRecord } from './components/SpecialVesselMarker';
+import { API, WS } from './api';
 
 type ViewMode = 'map' | 'routes' | 'fleet' | 'shipments' | 'activity';
 
@@ -104,7 +105,7 @@ function DataTable({ view, vessels, cargoes, events, query, onSelectVessel }: {
 }
 
 export default function App() {
-  const [page, setPage] = useState(() => window.location.pathname.toLowerCase());
+  const [page, setPage] = useState(() => normalizePath(window.location.pathname));
   const [view, setView] = useState<ViewMode>('map');
   const [query, setQuery] = useState('');
   const [state, setState] = useState<AppState>({
@@ -119,6 +120,12 @@ export default function App() {
   const [plannedRoutes, setPlannedRoutes] = useState<Array<{ requestId: string; coordinates: [number, number][]; distanceKm: number }>>([]);
   const [specialVessels, setSpecialVessels] = useState<SpecialVesselRecord[]>([]);
 
+  useEffect(() => {
+    const syncPage = () => setPage(normalizePath(window.location.pathname));
+    window.addEventListener('popstate', syncPage);
+    return () => window.removeEventListener('popstate', syncPage);
+  }, []);
+
   const normalizedQuery = query.trim().toLowerCase();
   const visibleVessels = state.vessels.filter(vessel => !normalizedQuery || `${vessel.vesselId} ${vessel.currentNodeId} ${vessel.status}`.toLowerCase().includes(normalizedQuery));
 
@@ -130,8 +137,8 @@ export default function App() {
   const refreshTopology = async () => {
     try {
       const [routeResponse, specialResponse] = await Promise.all([
-        fetch('http://127.0.0.1:3000/network/routes'),
-        fetch('http://127.0.0.1:3000/network/special-vessels'),
+        fetch(`${API}/network/routes`),
+        fetch(`${API}/network/special-vessels`),
       ]);
       if (routeResponse.ok) setPlannedRoutes(await routeResponse.json());
       if (specialResponse.ok) setSpecialVessels(await specialResponse.json());
@@ -142,23 +149,38 @@ export default function App() {
 
   useEffect(() => {
     if (page === '/ds_system' || page === '/next-stop' || page === '/clock' || page === '/special-class') return;
-    const ws = new WebSocket('ws://127.0.0.1:3000/ws');
-    ws.onopen = () => setState(current => ({ ...current, connected: true }));
-    ws.onclose = () => setState(current => ({ ...current, connected: false }));
-    ws.onmessage = message => {
-      const data = JSON.parse(message.data);
-      if (data.type === 'SIMULATION_EVENT') setState(current => ({ ...current, events: [...current.events, data.event] }));
-      if (data.type === 'STATE_UPDATE') setState(current => ({
-        ...current,
-        vessels: data.vessels,
-        cargoes: data.cargoes,
-        simulationTime: data.simulationTime,
-        timeMetadata: data.timeMetadata,
-      }));
-      if (data.type === 'ADMIN') setState(current => ({ ...current, systemStatus: data.payload, startedAt: data.payload.startedAt }));
-      if (data.type === 'ERROR_LOG') setState(current => ({ ...current, errors: data.errors ?? [] }));
+    let reconnectTimer: number | undefined;
+    let disposed = false;
+    let ws: WebSocket;
+    const connect = () => {
+      if (disposed) return;
+      ws = new WebSocket(WS);
+      ws.onopen = () => setState(current => ({ ...current, connected: true }));
+      ws.onclose = () => {
+        setState(current => ({ ...current, connected: false }));
+        if (!disposed) reconnectTimer = window.setTimeout(connect, 1500);
+      };
+      ws.onerror = () => ws.close();
+      ws.onmessage = message => {
+        const data = JSON.parse(message.data);
+        if (data.type === 'SIMULATION_EVENT') setState(current => ({ ...current, events: [...current.events, data.event] }));
+        if (data.type === 'STATE_UPDATE') setState(current => ({
+          ...current,
+          vessels: data.vessels,
+          cargoes: data.cargoes,
+          simulationTime: data.simulationTime,
+          timeMetadata: data.timeMetadata,
+        }));
+        if (data.type === 'ADMIN') setState(current => ({ ...current, systemStatus: data.payload, startedAt: data.payload.startedAt }));
+        if (data.type === 'ERROR_LOG') setState(current => ({ ...current, errors: data.errors ?? [] }));
+      };
     };
-    return () => ws.close();
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      ws.close();
+    };
   }, [page]);
 
   useEffect(() => {
@@ -169,6 +191,7 @@ export default function App() {
   if (page === '/next-stop') return <NextStopPage onBack={openSimulation} />;
   if (page === '/clock') return <ClockPage onBack={openSimulation} simulationTimeHours={state.simulationTime} timeMetadata={state.timeMetadata} startedAt={state.startedAt} running={!!state.systemStatus?.engineRunning} activeProfileId={state.systemStatus?.clockProfileId} />;
   if (page === '/special-class') return <SpecialClassPage onBack={openSimulation} />;
+  if (page !== '/') return <NotFoundPage path={window.location.pathname} onHome={openSimulation} />;
 
   return <div className="rycon-app">
     <header className="app-topbar">
@@ -188,7 +211,7 @@ export default function App() {
     </header>
 
     <section className="simulation-strip" aria-label="Simulation controls">
-      <SimulationControls onReset={resetSimulation} onInitialized={() => void refreshTopology()} initialized={!!state.systemStatus?.engineInitialized} running={!!state.systemStatus?.engineRunning} />
+      <SimulationControls onReset={resetSimulation} onInitialized={() => void refreshTopology()} initialized={!!state.systemStatus?.engineInitialized} running={!!state.systemStatus?.engineRunning} connected={state.connected} />
       <Clock simulationTime={state.simulationTime} timeMetadata={state.timeMetadata} />
       <div className="strip-events"><Radio size={14} /><span>{state.systemStatus?.totalEventsProcessed ?? 0} EVENTS</span></div>
     </section>
@@ -196,7 +219,7 @@ export default function App() {
     <main className={`workspace workspace-${view}`}>
       {view === 'map' || view === 'routes' ? <>
         <section className={`map-stage ${view === 'routes' ? 'map-stage-routes' : ''}`} aria-label={view === 'routes' ? 'Planned sea routes' : 'Fleet map'}>
-          <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} routesOnly={view === 'routes'} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />
+          <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} routesOnly={view === 'routes'} projection="map" cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />
           <div className="map-title-overlay"><span className="map-live-pip" /><div><strong>{view === 'routes' ? 'Route atlas' : 'Fleet tracking'}</strong><small>{view === 'routes' ? `${plannedRoutes.length} planned scenario corridors` : `${state.vessels.length} transport vessels · ${plannedRoutes.length} planned routes`}</small></div></div>
           <label className="map-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search vessel, node, status" aria-label="Search vessels" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}<kbd>/</kbd></label>
           {view === 'map' && <div className="map-layer-tools" aria-label="Map layers">
@@ -221,4 +244,21 @@ export default function App() {
     <nav className="mobile-view-navigation" aria-label="Workspace views"><ViewNavigation view={view} onChange={setView} /></nav>
     {reportOpen && <OperationalReport onClose={() => setReportOpen(false)} />}
   </div>;
+}
+
+function normalizePath(path: string) {
+  const normalized = path.toLowerCase().replace(/\/+$/, '');
+  return normalized || '/';
+}
+
+function NotFoundPage({ path, onHome }: { path: string; onHome: () => void }) {
+  return <main className="not-found-page">
+    <div className="not-found-card">
+      <span className="not-found-code">404 <i /> RYCORN ROUTE NOT FOUND</span>
+      <h1>This route is off the chart.</h1>
+      <p>There’s no Rycorn page at <code>{path}</code>. Check the address or return to the operations map.</p>
+      <button className="not-found-home" onClick={onHome}><Anchor size={16} /> Return to map</button>
+      <span className="not-found-coordinate">SYSTEM · ROUTE REGISTRY</span>
+    </div>
+  </main>;
 }

@@ -8,7 +8,7 @@
     "test:server": "pnpm --filter @rycon/server test",
     "dev:server": "pnpm --filter @rycon/server dev",
     "dev:client": "pnpm --filter @rycon/client dev",
-    "rycorn": "pnpm -r --parallel --filter @rycon/server --filter @rycon/client dev",
+    "rycorn": "bash ./Rycorn",
     "test:ds": "pnpm --filter @rycon/ds-system test",
     "build:client": "pnpm --filter @rycon/client build",
     "demo": "pnpm tsx packages/engine/scripts/demo.ts"

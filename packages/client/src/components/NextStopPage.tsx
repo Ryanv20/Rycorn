@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Compass, GitBranch, Globe2, RefreshCw, Ship } from 'lucide-react';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 
 interface ScenarioPlan {
   id: string;

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 
 type Demand = {
   requestId: string;

@@ -1,15 +1,35 @@
 import Fastify from 'fastify';
+import { existsSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import websocket from '@fastify/websocket';
 import cors from '@fastify/cors';
+import { getCanonicalPorts } from './data/portCatalog.js';
 import simulationRoutes from './routes/simulation.js';
 import networkRoutes from './routes/network.js';
 import rootRoutes from './routes/root.js';
 import dsRoutes from './routes/ds.js';
 import { simulationStream } from './websocket/SimulationStream.js';
 
+const dataRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../data');
+const requiredDataFiles = [
+  'processed/canonical-ports.json',
+  'raw/natural-earth/ne_10m_land.shp',
+  'raw/natural-earth/ne_10m_land.shx',
+  'raw/natural-earth/ne_10m_land.dbf',
+];
+const missingDataFiles = requiredDataFiles.filter(file => {
+  const path = resolve(dataRoot, file);
+  return !existsSync(path) || !statSync(path).isFile() || statSync(path).size === 0;
+});
+if (missingDataFiles.length > 0) {
+  throw new Error(`Rycorn startup blocked; required data files are not mounted: ${missingDataFiles.join(', ')}`);
+}
+if (getCanonicalPorts().length === 0) throw new Error('Rycorn startup blocked; canonical-ports.json contains no ports.');
+
 const app = Fastify({ logger: true });
 
-await app.register(cors, { origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] });
+await app.register(cors, { origin: true });
 await app.register(websocket);
 
 app.register(simulationRoutes);
@@ -32,7 +52,7 @@ app.register(async function (fastify) {
 });
 
 try {
-  await app.listen({ port: 3000, host: '127.0.0.1' });
+  await app.listen({ port: 3000, host: '0.0.0.0' });
   console.log('Server listening on http://localhost:3000');
 } catch (err) {
   app.log.error(err);

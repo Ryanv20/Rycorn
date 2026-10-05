@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 const RADIUS = 2.15;
 
 interface PortRecord {

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$repo_root"
+
+if [[ ! -f package.json || ! -f pnpm-workspace.yaml ]]; then
+  echo "Rycorn must be started from its repository root." >&2
+  exit 1
+fi
+
+required_files=(
+  "data/processed/canonical-ports.json"
+  "data/raw/natural-earth/ne_10m_land.shp"
+  "data/raw/natural-earth/ne_10m_land.shx"
+  "data/raw/natural-earth/ne_10m_land.dbf"
+)
+for required_file in "${required_files[@]}"; do
+  if [[ ! -s "$required_file" ]]; then
+    echo "Required Rycorn data file is missing or empty: $required_file" >&2
+    exit 1
+  fi
+done
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pnpm is required. Install pnpm, then run ./Rycorn again." >&2
+  exit 1
+fi
+
+echo "Preparing workspace dependencies from the local pnpm cache (offline)..."
+if ! pnpm install --offline --frozen-lockfile; then
+  echo "Rycorn cannot start offline because a dependency is missing from the local pnpm cache." >&2
+  echo "Reconnect once and run: pnpm install" >&2
+  exit 1
+fi
+
+echo "Starting Rycorn API, WebSocket server, and client..."
+echo "Open http://localhost:5173 and initialize the simulation from the controls."
+lan_addresses="$(hostname -I 2>/dev/null || true)"
+if [[ -n "$lan_addresses" ]]; then
+  for address in $lan_addresses; do
+    echo "Phone on the same Wi-Fi: http://${address}:5173"
+  done
+else
+  echo "Phone on the same Wi-Fi: open this computer's IP address at port 5173."
+fi
+exec pnpm -r --parallel --filter @rycon/server --filter @rycon/client dev

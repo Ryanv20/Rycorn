@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 
 interface ReportMilestone {
   eventId: string;

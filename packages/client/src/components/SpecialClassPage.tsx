@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Crosshair, Shield, Ship } from 'lucide-react';
 import type { SpecialVesselRecord } from './SpecialVesselMarker';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 
 export default function SpecialClassPage({ onBack }: { onBack: () => void }) {
   const [vessels, setVessels] = useState<SpecialVesselRecord[]>([]);

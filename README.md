@@ -7,11 +7,10 @@ Maritime logistics simulation workspace: demand/supply operations, vessel routin
 From the repository root:
 
 ```bash
-pnpm install
-pnpm rycorn
+./Rycorn
 ```
 
-Open [http://localhost:5173](http://localhost:5173). The single command starts both the API/WebSocket server and the client. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. The unauthenticated development API binds to `127.0.0.1`; keep it local.
+The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server and client together. Open [http://localhost:5173](http://localhost:5173), initialize the simulation from the controls, then press **Run**. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
 
 ## Tests
 

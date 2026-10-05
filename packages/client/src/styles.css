@@ -29,6 +29,16 @@ button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
 
 .rycon-app { display: grid; grid-template-rows: 62px 54px minmax(0, 1fr); width: 100%; height: 100dvh; min-height: 560px; overflow: hidden; background: var(--canvas); }
+.not-found-page { display: grid; width: 100%; min-height: 100dvh; place-items: center; padding: 24px; background: radial-gradient(ellipse at 52% 42%, #f7faf7 0, var(--canvas) 66%); }
+.not-found-card { width: min(560px, 100%); padding: clamp(26px, 6vw, 54px); border: 1px solid var(--line); border-radius: 6px; background: var(--paper); box-shadow: 0 20px 70px #15373b12; }
+.not-found-code { display: flex; align-items: center; gap: 9px; color: var(--teal); font: 700 10px var(--mono); letter-spacing: .65px; }
+.not-found-code i { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 4px #d76f5f20; }
+.not-found-card h1 { margin: 27px 0 10px; color: var(--ink); font-size: clamp(30px, 6vw, 44px); line-height: 1.08; letter-spacing: -1.5px; }
+.not-found-card p { margin: 0; color: #62777a; font-size: 13px; line-height: 1.7; }
+.not-found-card code { padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; color: #49666a; background: var(--paper-muted); font: 11px var(--mono); overflow-wrap: anywhere; }
+.not-found-home { display: inline-flex; align-items: center; gap: 8px; min-height: 39px; margin-top: 25px; padding: 0 14px; border: 1px solid #087f78; border-radius: 4px; color: #fff; background: var(--teal); font-size: 11px; font-weight: 700; cursor: pointer; }
+.not-found-home:hover { background: #096c67; }
+.not-found-coordinate { display: block; margin-top: 38px; padding-top: 13px; border-top: 1px solid var(--line); color: #95a5a4; font: 8px var(--mono); letter-spacing: .7px; }
 .app-topbar { display: flex; align-items: center; gap: 24px; min-width: 0; padding: 0 20px; color: #eff8f5; background: var(--night); border-bottom: 1px solid #29474c; }
 .brand-lockup { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .brand-mark { display: grid; width: 35px; height: 35px; place-items: center; color: #d3f7ef; background: #17635f; border: 1px solid #39847a; border-radius: 6px; }
@@ -51,6 +61,21 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
 .simulation-strip { z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; padding: 0 18px; background: var(--paper); border-bottom: 1px solid var(--line); box-shadow: 0 2px 7px rgba(21,52,55,.035); }
 .simulation-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.simulation-control-wrap { position: relative; display: flex; align-items: center; min-width: 0; padding-bottom: 4px; }
+.engine-status { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 10px; border: 1px solid #cddbd6; border-radius: 4px; color: #53696c; background: #f3f7f5; font: 700 9px var(--mono); letter-spacing: .15px; white-space: nowrap; }
+.engine-status i { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #8a9a98; }
+.engine-status.is-active { color: #087f78; border-color: #a9d9cd; background: #e7f6f1; }
+.engine-status.is-active i { background: #18a286; box-shadow: 0 0 0 3px #cdeee3; }
+.engine-status.is-paused { color: #8b6428; border-color: #e7d4ac; background: #fff8e9; }
+.engine-status.is-paused i { background: #d49b37; }
+.engine-status.is-error { color: #a2473e; border-color: #e8c0b9; background: #fff2ee; }
+.engine-status.is-error i { background: #d76f5f; }
+.status-spinner { flex: 0 0 auto; animation: engine-spin 850ms linear infinite; }
+@keyframes engine-spin { to { transform: rotate(360deg); } }
+.engine-progress { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; overflow: hidden; border-radius: 3px; background: #dce9e4; }
+.engine-progress span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--mint); animation: engine-progress 1.2s ease-in-out infinite; }
+@keyframes engine-progress { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+.engine-error { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; width: min(420px, 90vw); padding: 9px 11px; border: 1px solid #e8c0b9; border-radius: 4px; color: #8c4038; background: #fff5f1; box-shadow: 0 4px 15px #203a3b24; font-size: 11px; overflow-wrap: anywhere; }
 .control-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; color: #3e5a5e; background: #fff; font-size: 11px; font-weight: 600; cursor: pointer; transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
 .control-button:hover:not(:disabled) { color: var(--teal); border-color: #96c9bf; background: #f1faf7; }
 .control-button:disabled { opacity: .45; cursor: not-allowed; }
@@ -398,7 +423,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 }
 
 @media (max-width: 760px) {
-	.rycon-app { grid-template-rows: 56px 48px minmax(0, 1fr) 58px; min-height: 500px; height: 100dvh; }
+	.rycon-app { grid-template-rows: 56px 68px minmax(0, 1fr) 58px; min-height: 500px; height: 100dvh; }
 	.app-topbar { gap: 8px; padding: 0 10px; }
 	.brand-mark { width: 32px; height: 32px; }
 	.brand-copy strong { font-size: 12px; }
@@ -408,10 +433,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 	.topbar-actions { gap: 5px; margin-left: auto; }
 	.header-action { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
 	.header-action span { display: none; }
-	.simulation-strip { justify-content: flex-start; gap: 10px; padding: 0 8px; overflow-x: auto; scrollbar-width: none; }
+	.simulation-strip { justify-content: flex-start; gap: 10px; padding: 0 8px; overflow-x: auto; overflow-y: visible; scrollbar-width: none; }
 	.simulation-strip::-webkit-scrollbar { display: none; }
 	.simulation-controls { gap: 4px; }
-	.control-button { min-height: 31px; gap: 4px; padding: 0 7px; font-size: 9px; }
+	.simulation-control-wrap { flex: 0 0 auto; }
+	.engine-status { min-height: 38px; gap: 5px; padding: 0 7px; font-size: 8px; }
+	.control-button { min-width: 38px; min-height: 40px; gap: 4px; padding: 0 8px; font-size: 9px; }
 	.playback-group { gap: 2px; padding: 2px; }
 	.speed-presets { gap: 0; padding: 2px; }
 	.speed-presets button { min-width: 25px; min-height: 22px; padding: 0 3px; font-size: 8px; }

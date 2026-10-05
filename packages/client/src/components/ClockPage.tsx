@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarClock, Clock3, Gauge, Info } from 'lucide-react';
+import { API } from '../api';
 
-const API = 'http://127.0.0.1:3000';
 const clockProfiles = [
   { id: 'REAL_TIME', label: 'RTS · Real time', rate: '1 sim hour / 1 real hour', detail: 'Use for live-pace operations and comparing the model with the wall clock.' },
   { id: 'HOUR_PER_SECOND', label: 'Hour / second', rate: '1 sim hour / 1 real second', detail: 'Default review pace; a modeled day takes 24 seconds.' },

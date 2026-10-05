@@ -5,6 +5,7 @@ import PortMarker from './PortMarker';
 import VesselMarker from './VesselMarker';
 import SpecialVesselMarker, { type SpecialVesselRecord } from './SpecialVesselMarker';
 import GlobeView from './GlobeView';
+import { API } from '../api';
 
 const routeColors = ['#ff9f68', '#5dd5c5', '#e2c569', '#83b7d1', '#e47d70'];
 
@@ -69,8 +70,8 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
 
   useEffect(() => {
     Promise.all([
-      fetch('http://127.0.0.1:3000/network/nodes').then(response => response.json()),
-      fetch('http://127.0.0.1:3000/network/ports').then(response => response.json()),
+      fetch(`${API}/network/nodes`).then(response => response.json()),
+      fetch(`${API}/network/ports`).then(response => response.json()),
     ]).then(([nextNodes, nextPorts]) => {
       setNodes(nextNodes);
       setPorts(nextPorts);
