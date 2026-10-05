@@ -10,7 +10,7 @@ From the repository root:
 ./Rycorn
 ```
 
-The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server and client together. Open [http://localhost:5173](http://localhost:5173), initialize the simulation from the controls, then press **Run**. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
+The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server and client together. Open the client URL printed by the launcher, initialize the simulation from the controls, then press **Run**. The launcher selects available ports (3000 and 5173 by default); set `RYCORN_API_PORT` or `RYCORN_CLIENT_PORT` to choose a starting port. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
 
 ## Tests
 

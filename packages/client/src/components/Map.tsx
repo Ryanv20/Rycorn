@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { LatLngBounds } from 'leaflet';
 import { MapContainer, Polyline, TileLayer, ZoomControl, useMap } from 'react-leaflet';
 import PortMarker from './PortMarker';
 import VesselMarker from './VesselMarker';
 import SpecialVesselMarker, { type SpecialVesselRecord } from './SpecialVesselMarker';
-import GlobeView from './GlobeView';
 import { API } from '../api';
+
+const GlobeView = lazy(() => import('./GlobeView'));
 
 const routeColors = ['#ff9f68', '#5dd5c5', '#e2c569', '#83b7d1', '#e47d70'];
 
@@ -82,16 +83,18 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
   }, []);
 
   if (projection === 'globe') {
-    return <GlobeView
-      routes={showRoutes ? plannedRoutes : []}
-      vessels={vessels}
-      selectedVesselId={selectedVesselId}
-      onSelectVessel={onSelectVessel}
-    />;
+    return <Suspense fallback={<div className="globe-loading" role="status">Loading global view…</div>}>
+      <GlobeView
+        routes={showRoutes ? plannedRoutes : []}
+        vessels={showRoutes ? vessels : vessels.map(({ currentRoute, ...vessel }) => vessel)}
+        selectedVesselId={selectedVesselId}
+        onSelectVessel={onSelectVessel}
+      />
+    </Suspense>;
   }
 
   return (
-    <MapContainer className="leaflet-map" center={[30, -28]} zoom={4} zoomControl={false}>
+    <MapContainer className="leaflet-map" center={[30, -28]} zoom={4} zoomControl={false} preferCanvas>
       <TileLayer
         className="nautical-tiles"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'

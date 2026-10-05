@@ -33,7 +33,7 @@ export interface TimeMetadata {
   observedAtSource: 'server-host-system-clock';
 }
 
-export type ClockProfileId = 'REAL_TIME' | 'HOUR_PER_SECOND' | 'DAY_PER_MINUTE' | 'FAST_REVIEW';
+export type ClockProfileId = 'REAL_TIME' | 'HOUR_PER_SECOND' | 'DAY_PER_MINUTE' | 'FAST_REVIEW' | 'MINUTE_PER_SECOND' | 'SIX_HOURS_PER_SECOND' | 'WEEK_PER_SECOND';
 
 export interface ClockProfile {
   id: ClockProfileId;
@@ -47,6 +47,9 @@ export const CLOCK_PROFILES: ClockProfile[] = [
   { id: 'HOUR_PER_SECOND', label: 'One hour / second', description: 'One simulated hour advances every real second.', simulatedHoursPerWallSecond: 1 },
   { id: 'DAY_PER_MINUTE', label: 'One day / minute', description: 'Twenty-four simulated hours advance each real minute.', simulatedHoursPerWallSecond: 0.4 },
   { id: 'FAST_REVIEW', label: 'Fast review', description: 'One simulated day advances every real second.', simulatedHoursPerWallSecond: 24 },
+  { id: 'MINUTE_PER_SECOND', label: 'Minute / second', description: 'One modeled minute advances each real second for slow, readable playback.', simulatedHoursPerWallSecond: 1 / 60 },
+  { id: 'SIX_HOURS_PER_SECOND', label: 'Six hours / second', description: 'Six modeled hours advance each real second for quick scenario review.', simulatedHoursPerWallSecond: 6 },
+  { id: 'WEEK_PER_SECOND', label: 'Week / second', description: 'One modeled week advances each real second for high speed batch runs.', simulatedHoursPerWallSecond: 168 },
 ];
 
 export interface BroadcastMessage {

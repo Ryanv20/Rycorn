@@ -34,14 +34,34 @@ if ! pnpm install --offline --frozen-lockfile; then
   exit 1
 fi
 
+find_open_port() {
+  local candidate="$1"
+  while (( candidate < 65536 )); do
+    if node -e 'const server = require("node:net").createServer(); server.once("error", () => process.exit(1)); server.listen(Number(process.argv[1]), "0.0.0.0", () => server.close(() => process.exit(0)));' "$candidate" >/dev/null 2>&1; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+    ((candidate += 1))
+  done
+  echo "No open port found starting at $1." >&2
+  return 1
+}
+
+api_port="$(find_open_port "${RYCORN_API_PORT:-3000}")"
+client_port="$(find_open_port "${RYCORN_CLIENT_PORT:-5173}")"
+export RYCORN_API_PORT="$api_port"
+export RYCORN_CLIENT_PORT="$client_port"
+export VITE_RYCORN_API_PORT="$api_port"
+
 echo "Starting Rycorn API, WebSocket server, and client..."
-echo "Open http://localhost:5173 and initialize the simulation from the controls."
+echo "API: http://localhost:${api_port}"
+echo "Open http://localhost:${client_port} and initialize the simulation from the controls."
 lan_addresses="$(hostname -I 2>/dev/null || true)"
 if [[ -n "$lan_addresses" ]]; then
   for address in $lan_addresses; do
-    echo "Phone on the same Wi-Fi: http://${address}:5173"
+    echo "Phone on the same Wi-Fi: http://${address}:${client_port}"
   done
 else
-  echo "Phone on the same Wi-Fi: open this computer's IP address at port 5173."
+  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port}."
 fi
 exec pnpm -r --parallel --filter @rycon/server --filter @rycon/client dev

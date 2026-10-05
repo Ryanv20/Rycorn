@@ -26,6 +26,7 @@ interface VesselRecord {
   vesselId: string;
   currentNodeId: string;
   status: string;
+  currentRoute?: { path?: string[]; found?: boolean };
 }
 
 interface GlobeViewProps {
@@ -64,19 +65,18 @@ function addGraticule(group: THREE.Group): void {
   }
 }
 
-function addRoutes(group: THREE.Group, routes: RouteRecord[]): number {
+function addRouteLines(group: THREE.Group, routes: RouteRecord[], color: number, radiusOffset: number, opacity: number): number {
   let count = 0;
-  const material = new THREE.LineBasicMaterial({ color: 0xf1a36d, transparent: true, opacity: 0.64 });
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
   for (const route of routes) {
     for (let pointIndex = 0; pointIndex < route.coordinates.length - 1; pointIndex += 1) {
       const [longitudeA, latitudeA] = route.coordinates[pointIndex];
       const [longitudeB, latitudeB] = route.coordinates[pointIndex + 1];
-      const start = vectorFor(latitudeA, longitudeA, RADIUS + 0.014);
-      const end = vectorFor(latitudeB, longitudeB, RADIUS + 0.014);
-      const middle = start.clone().add(end).normalize().multiplyScalar(RADIUS + 0.09);
+      const start = vectorFor(latitudeA, longitudeA, RADIUS + radiusOffset);
+      const end = vectorFor(latitudeB, longitudeB, RADIUS + radiusOffset);
+      const middle = start.clone().add(end).normalize().multiplyScalar(RADIUS + radiusOffset + 0.075);
       const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
-      const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(14));
-      group.add(new THREE.Line(geometry, material));
+      group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 18, radiusOffset > 0.02 ? 0.008 : 0.005, 5, false), material));
       count += 1;
     }
   }
@@ -92,28 +92,62 @@ function addPorts(group: THREE.Group, ports: PortRecord[]): void {
   group.add(new THREE.Points(geometry, material));
 }
 
-function addVessels(group: THREE.Group, vessels: VesselRecord[], nodes: NodeRecord[]): void {
+function addVessels(group: THREE.Group, vessels: VesselRecord[], nodes: NodeRecord[], selectedVesselId: string | null): void {
   const positions: number[] = [];
-  const activePositions: number[] = [];
+  const colors: number[] = [];
+  const vesselIds: string[] = [];
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
   for (const vessel of vessels) {
-    const node = nodes.find(item => item.id === vessel.currentNodeId);
+    const path = vessel.status === 'SAILING' ? (vessel.currentRoute?.path ?? []).map(id => nodeById.get(id)).filter((node): node is NodeRecord => !!node) : [];
+    const node = path.length >= 2 ? path[Math.floor((path.length - 1) / 2)] : nodeById.get(vessel.currentNodeId);
     if (!node) continue;
-    const target = vessel.status === 'SAILING' ? activePositions : positions;
-    target.push(...vectorFor(node.latitude, node.longitude, RADIUS + 0.045).toArray());
+    positions.push(...vectorFor(node.latitude, node.longitude, RADIUS + 0.055).toArray());
+    const color = vessel.vesselId === selectedVesselId
+      ? new THREE.Color(0xffffff)
+      : vessel.status === 'SAILING' ? new THREE.Color(0xff916d) : new THREE.Color(0xf2d181);
+    colors.push(color.r, color.g, color.b);
+    vesselIds.push(vessel.vesselId);
   }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const ships = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 0.09, sizeAttenuation: true, transparent: true, opacity: 1, vertexColors: true, depthWrite: false }));
+  ships.userData.vesselIds = vesselIds;
+  ships.userData.kind = 'vessels';
+  group.add(ships);
+}
 
-  for (const [values, color, size] of [[positions, 0xf2d181, 0.035], [activePositions, 0xff916d, 0.052]] as const) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(values, 3));
-    group.add(new THREE.Points(geometry, new THREE.PointsMaterial({ color, size, sizeAttenuation: true, transparent: true, opacity: 0.98 })));
-  }
+function addActiveRoutes(group: THREE.Group, vessels: VesselRecord[], nodes: NodeRecord[]): number {
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  const routes = vessels.filter(vessel => vessel.status === 'SAILING').map(vessel => ({
+    requestId: vessel.vesselId,
+    coordinates: (vessel.currentRoute?.path ?? []).map(id => nodeById.get(id)).filter((node): node is NodeRecord => !!node).map(node => [node.longitude, node.latitude] as [number, number]),
+  })).filter(route => route.coordinates.length > 1);
+  return addRouteLines(group, routes, 0x56e0ce, 0.034, 0.98);
+}
+
+function disposeGroup(group: THREE.Group): void {
+  group.traverse(object => {
+    if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) {
+      object.geometry.dispose();
+      const material = object.material;
+      if (Array.isArray(material)) material.forEach(item => item.dispose());
+      else material.dispose();
+    }
+  });
 }
 
 export default function GlobeView({ routes, vessels, selectedVesselId, onSelectVessel }: GlobeViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const dataRef = useRef({ routes, vessels, selectedVesselId, onSelectVessel });
+  const dynamicGroupRef = useRef<THREE.Group | null>(null);
+  const globeGroupRef = useRef<THREE.Group | null>(null);
+  const nodesRef = useRef<NodeRecord[]>([]);
   const [portCount, setPortCount] = useState(0);
   const [routeCount, setRouteCount] = useState(0);
   const [error, setError] = useState('');
+
+  dataRef.current = { routes, vessels, selectedVesselId, onSelectVessel };
 
   useEffect(() => {
     let disposed = false;
@@ -157,8 +191,13 @@ export default function GlobeView({ routes, vessels, selectedVesselId, onSelectV
         globeGroup.add(atmosphere);
         addGraticule(globeGroup);
         addPorts(globeGroup, ports);
-        setRouteCount(addRoutes(globeGroup, routes));
-        addVessels(globeGroup, vessels, nodes);
+        globeGroupRef.current = globeGroup;
+        nodesRef.current = nodes;
+        const dynamicGroup = new THREE.Group();
+        dynamicGroupRef.current = dynamicGroup;
+        setRouteCount(addRouteLines(dynamicGroup, dataRef.current.routes, 0xffad72, 0.018, 0.58) + addActiveRoutes(dynamicGroup, dataRef.current.vessels, nodes));
+        addVessels(dynamicGroup, dataRef.current.vessels, nodes, dataRef.current.selectedVesselId);
+        globeGroup.add(dynamicGroup);
 
         scene.add(new THREE.HemisphereLight(0xa5d8d3, 0x0e2028, 2.0));
         const keyLight = new THREE.DirectionalLight(0xffdfb2, 1.7);
@@ -209,8 +248,10 @@ export default function GlobeView({ routes, vessels, selectedVesselId, onSelectV
           raycaster.params.Points!.threshold = 0.08;
           raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
           const intersections = raycaster.intersectObject(globeGroup, true);
-          const pointHit = intersections.find(hit => hit.object instanceof THREE.Points);
-          if (pointHit && vessels.length) onSelectVessel(selectedVesselId ?? vessels[0].vesselId);
+          const pointHit = intersections.find(hit => hit.object instanceof THREE.Points && hit.object.userData.kind === 'vessels');
+          const current = dataRef.current;
+          const hitVesselId = pointHit?.index === undefined ? undefined : (pointHit.object.userData.vesselIds as string[] | undefined)?.[pointHit.index];
+          if (hitVesselId) current.onSelectVessel(hitVesselId);
         };
         renderer.domElement.addEventListener('pointerdown', onPointerDown);
         renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -246,6 +287,9 @@ export default function GlobeView({ routes, vessels, selectedVesselId, onSelectV
           });
           renderer.dispose();
           renderer.domElement.remove();
+          dynamicGroupRef.current = null;
+          globeGroupRef.current = null;
+          nodesRef.current = [];
         };
       } catch (loadError) {
         if (!disposed) setError(loadError instanceof Error ? loadError.message : 'Unable to render globe.');
@@ -259,12 +303,26 @@ export default function GlobeView({ routes, vessels, selectedVesselId, onSelectV
       cleanup?.();
       cancelAnimationFrame(animationFrame);
     };
-  }, [routes, vessels, selectedVesselId, onSelectVessel]);
+  }, []);
+
+  useEffect(() => {
+    const globeGroup = globeGroupRef.current;
+    const previous = dynamicGroupRef.current;
+    if (!globeGroup || !previous) return;
+    globeGroup.remove(previous);
+    disposeGroup(previous);
+    const next = new THREE.Group();
+    setRouteCount(addRouteLines(next, routes, 0xffad72, 0.018, 0.58) + addActiveRoutes(next, vessels, nodesRef.current));
+    addVessels(next, vessels, nodesRef.current, selectedVesselId);
+    globeGroup.add(next);
+    dynamicGroupRef.current = next;
+  }, [routes, vessels, selectedVesselId]);
 
   return <section className="globe-stage" aria-label="Three-dimensional globe">
     <div className="globe-canvas" ref={hostRef} />
     <div className="globe-heading"><span className="globe-live-dot" /><div><strong>Global maritime view</strong><small>Drag to rotate · scroll to zoom</small></div></div>
-    <div className="globe-counts"><span>{portCount.toLocaleString()} WPI PORTS</span><span>{routeCount} ROUTE SEGMENTS</span><span>{vessels.length} VESSELS</span></div>
+    <div className="globe-counts"><span>{portCount.toLocaleString()} PORTS</span><span>{routeCount} ROUTE LEGS</span><span>{vessels.length} VESSELS</span></div>
+    <div className="globe-legend" aria-label="Globe legend"><span><i className="legend-ship" /> Ships</span><span><i className="legend-active-route" /> Active vessel routes</span><span><i className="legend-planned-route" /> Planned routes</span></div>
     <div className="globe-caption">Scenario and lane visualization only · not navigational guidance</div>
     {error && <div className="globe-error">{error}</div>}
   </section>;

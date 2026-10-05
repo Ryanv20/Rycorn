@@ -26,10 +26,17 @@ export default function VesselMarker({ vessel, nodes, vesselIndex, selected, onS
   const [position, setPosition] = useState<[number, number] | null>(currentPoint);
   const positionRef = useRef<[number, number] | null>(currentPoint);
   const animationFrame = useRef<number | null>(null);
+  const lastPaint = useRef(0);
 
   const updatePosition = (nextPosition: [number, number]) => {
     positionRef.current = nextPosition;
-    setPosition(nextPosition);
+    // Vessel coordinates arrive continuously; cap React/Leaflet marker updates
+    // to 20 fps while keeping the position animation smooth to the eye.
+    const now = performance.now();
+    if (now - lastPaint.current >= 50 || now === 0) {
+      lastPaint.current = now;
+      setPosition(nextPosition);
+    }
   };
 
   useEffect(() => {

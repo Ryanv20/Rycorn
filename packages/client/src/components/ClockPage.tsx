@@ -7,6 +7,9 @@ const clockProfiles = [
   { id: 'HOUR_PER_SECOND', label: 'Hour / second', rate: '1 sim hour / 1 real second', detail: 'Default review pace; a modeled day takes 24 seconds.' },
   { id: 'DAY_PER_MINUTE', label: 'Day / minute', rate: '1 sim day / 1 real minute', detail: 'Slower, readable playback for observing multi-day journeys.' },
   { id: 'FAST_REVIEW', label: 'Fast review', rate: '1 sim day / 1 real second', detail: 'Rapidly run scenario batches; event order and modeled durations are preserved.' },
+  { id: 'MINUTE_PER_SECOND', label: 'Minute / second', rate: '1 sim minute / 1 real second', detail: 'Slow, readable playback for inspecting operations in small time increments.' },
+  { id: 'SIX_HOURS_PER_SECOND', label: 'Six hours / second', rate: '6 sim hours / 1 real second', detail: 'Quick scenario review while keeping multi-day event order visible.' },
+  { id: 'WEEK_PER_SECOND', label: 'Week / second', rate: '1 sim week / 1 real second', detail: 'High speed playback for longer scenario batches.' },
 ] as const;
 
 interface ClockPageProps {

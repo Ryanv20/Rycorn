@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Anchor, CalendarClock, ClipboardList, Compass, FileText, Map as MapIcon, Navigation, Package, Radio, Search, Shield, Ship, X } from 'lucide-react';
+import { Activity, Anchor, CalendarClock, ClipboardList, Compass, FileText, Globe2, Map as MapIcon, Navigation, Package, Radio, Search, Shield, Ship, X } from 'lucide-react';
 import Map from './components/Map';
 import SimulationControls from './components/SimulationControls';
 import EventLog from './components/EventLog';
@@ -117,6 +117,7 @@ export default function App() {
   const [showRoutes, setShowRoutes] = useState(true);
   const [showSpecial, setShowSpecial] = useState(true);
   const [cameraFollow, setCameraFollow] = useState(false);
+  const [projection, setProjection] = useState<'map' | 'globe'>('map');
   const [plannedRoutes, setPlannedRoutes] = useState<Array<{ requestId: string; coordinates: [number, number][]; distanceKm: number }>>([]);
   const [specialVessels, setSpecialVessels] = useState<SpecialVesselRecord[]>([]);
 
@@ -219,10 +220,11 @@ export default function App() {
     <main className={`workspace workspace-${view}`}>
       {view === 'map' || view === 'routes' ? <>
         <section className={`map-stage ${view === 'routes' ? 'map-stage-routes' : ''}`} aria-label={view === 'routes' ? 'Planned sea routes' : 'Fleet map'}>
-          <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} routesOnly={view === 'routes'} projection="map" cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />
+          <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} routesOnly={view === 'routes'} projection={view === 'routes' ? 'map' : projection} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />
           <div className="map-title-overlay"><span className="map-live-pip" /><div><strong>{view === 'routes' ? 'Route atlas' : 'Fleet tracking'}</strong><small>{view === 'routes' ? `${plannedRoutes.length} planned scenario corridors` : `${state.vessels.length} transport vessels · ${plannedRoutes.length} planned routes`}</small></div></div>
           <label className="map-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search vessel, node, status" aria-label="Search vessels" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}<kbd>/</kbd></label>
           {view === 'map' && <div className="map-layer-tools" aria-label="Map layers">
+            <button className={projection === 'globe' ? 'is-active' : ''} onClick={() => setProjection(value => value === 'map' ? 'globe' : 'map')} title={projection === 'map' ? 'Switch to globe view' : 'Switch to flat map'} aria-label={projection === 'map' ? 'Switch to globe view' : 'Switch to flat map'} aria-pressed={projection === 'globe'}><Globe2 size={16} /><span>{projection === 'map' ? 'Globe' : 'Map'}</span></button>
             <button className={showPorts ? 'is-active' : ''} onClick={() => setShowPorts(value => !value)} title="Toggle ports" aria-pressed={showPorts}><Anchor size={16} /><span>Ports</span></button>
             <button className={showRoutes ? 'is-active' : ''} onClick={() => setShowRoutes(value => !value)} title="Toggle routes" aria-pressed={showRoutes}><Radio size={16} /><span>Routes</span></button>
             <button className={showSpecial ? 'is-active' : ''} onClick={() => setShowSpecial(value => !value)} title="Toggle special-class patrol fixtures" aria-pressed={showSpecial}><Shield size={16} /><span>Special</span></button>
