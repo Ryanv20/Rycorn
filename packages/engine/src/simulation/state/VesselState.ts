@@ -6,6 +6,7 @@ export type VesselStatus =
   | 'ASSIGNED'
   | 'LOADING'
   | 'SAILING'
+  | 'REPOSITIONING'
   | 'ARRIVED'
   | 'UNLOADING';
 
@@ -21,4 +22,6 @@ export interface VesselState {
   currentNodeId: string;
   assignedCargoIds: string[];
   currentRoute?: RouteResult;
+  currentVoyageStartedAt?: number;
+  expectedArrivalAt?: number;
 }

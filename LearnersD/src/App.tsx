@@ -28,7 +28,7 @@ export default function App() {
       <main id="main-content" className={styles.content}>
         {route.page === 'home'    && <HomePage    navigate={navigate} />}
         {route.page === 'lesson'  && <LessonPage  id={route.id} navigate={navigate} />}
-        {route.page === 'glossary'&& <GlossaryPage navigate={navigate} />}
+        {route.page === 'glossary'&& <GlossaryPage />}
         {route.page === 'diagram' && <DiagramPage />}
       </main>
     </div>

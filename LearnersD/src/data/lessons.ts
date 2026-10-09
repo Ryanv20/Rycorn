@@ -16,6 +16,7 @@ export interface Section {
   id: string;
   title: string;
   content: string;              // Markdown-lite: supports **bold**, `code`, > blockquote, ## headings
+  content2?: string;            // Optional second content block
   code?: CodeExample[];
   diagram?: string;             // ASCII/text diagram
 }

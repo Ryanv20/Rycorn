@@ -1,5 +1,4 @@
 import { useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
 import { Search } from 'lucide-react'
 import { lessons } from '../data/lessons'
 import styles from './GlossaryPage.module.css'
@@ -55,8 +54,7 @@ export default function GlossaryPage() {
   const letters = Object.keys(grouped).sort()
 
   return (
-    <div className={styles.page}>
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <div className={`${styles.page} fade-up`}>
         <h1 className={styles.title}>📖 Glossary</h1>
         <p className={styles.subtitle}>
           Every key term used across all {lessons.length} Rycorn lessons — searchable, alphabetically sorted.
@@ -82,11 +80,9 @@ export default function GlossaryPage() {
         )}
 
         {letters.map(letter => (
-          <motion.div
+          <div
             key={letter}
             className={styles.group}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
           >
             <div className={styles.letterHeading}>{letter}</div>
             <div className={styles.termList}>
@@ -94,17 +90,16 @@ export default function GlossaryPage() {
                 <div key={`${entry.term}-${entry.lessonId}`} className={styles.termCard}>
                   <div className={styles.termHeader}>
                     <code className={styles.term}>{entry.term}</code>
-                    <a href={`/lesson/${entry.lessonId}`} className={styles.source}>
+                    <span className={styles.source}>
                       {entry.emoji} {entry.lessonTitle}
-                    </a>
+                    </span>
                   </div>
                   <p className={styles.definition}>{entry.definition}</p>
                 </div>
               ))}
             </div>
-          </motion.div>
+          </div>
         ))}
-      </motion.div>
     </div>
   )
 }

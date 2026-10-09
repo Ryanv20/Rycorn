@@ -9,5 +9,7 @@ export interface CargoState {
   quantity: number;
   earliestDeparture?: number;
   deadline?: number;
+  deadlineMet?: boolean;
+  latenessHours?: number;
   cargoType?: string;
 }

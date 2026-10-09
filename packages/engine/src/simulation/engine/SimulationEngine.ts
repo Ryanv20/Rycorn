@@ -10,6 +10,11 @@ import { Router } from '../../routing/Router';
 import { MovementCalculator } from '../../movement/MovementCalculator';
 import { VesselCapability } from '../../domain/network/VesselCapability';
 import { SimulationClock } from '../SimulationClock';
+import { CompositeMovementModifier } from '../../conditions/CompositeMovementModifier';
+import { CongestionModel } from '../../conditions/models/CongestionModel';
+import { PortDelayModel } from '../../conditions/models/PortDelayModel';
+import { WeatherModel } from '../../conditions/models/WeatherModel';
+import { SeededRng } from '../../conditions/SeededRng';
 
 export interface VesselDefinition {
   id: string;
@@ -56,11 +61,24 @@ export class SimulationEngine {
   private demandEventCounter = 0;
   
   initialize(input: SimulationInput): void {
-    const config = input.config || { loadDurationHours: 2, unloadDurationHours: 2 };
+    const config: SimulationConfig = input.config ?? { loadDurationHours: 2, unloadDurationHours: 2 };
     const router = new Router(input.network);
-    const movement = new MovementCalculator(config.speedProfiles, config.movementModifier);
+    const environment = config.environment;
+    const conditionRng = environment?.enabled ? new SeededRng(environment.seed) : undefined;
+    const movementModifiers = conditionRng
+      ? [
+        new WeatherModel(conditionRng, environment?.maxWeatherImpact ?? 0.12),
+        ...(environment?.congestionEnabled === false ? [] : [new CongestionModel()]),
+      ]
+      : [];
+    const movementModifier = config.movementModifier
+      ?? (movementModifiers.length > 0 ? new CompositeMovementModifier(movementModifiers) : undefined);
+    const portDelayModifier = config.portDelayModifier
+      ?? (conditionRng ? new PortDelayModel(conditionRng, environment?.maxPortDelayHours ?? 1.5) : undefined);
+    const movement = new MovementCalculator(config.speedProfiles, movementModifier);
+    const effectiveConfig = { ...config, portDelayModifier };
     
-    this.processor = new EventProcessor(this.context, this.queue, router, movement, config);
+    this.processor = new EventProcessor(this.context, this.queue, router, movement, effectiveConfig);
     this.clock.reset();
     this.initialized = true;
     
@@ -122,6 +140,31 @@ export class SimulationEngine {
     this.scheduleAvailableVessels(cargo);
   }
 
+  addVessel(vessel: VesselDefinition): void {
+    if (!this.initialized) throw new Error('Engine must be initialized before adding a vessel');
+    if (this.context.vessels.has(vessel.id)) throw new Error(`Vessel ${vessel.id} already exists`);
+    this.context.vessels.set(vessel.id, {
+      vesselId: vessel.id,
+      vesselCapability: vessel.capability,
+      vesselType: vessel.vesselType ?? 'GENERAL_CARGO',
+      deadweightTonnes: vessel.deadweightTonnes ?? 12000,
+      fuelCapacityTonnes: vessel.fuelCapacityTonnes ?? 1200,
+      fuelRemainingTonnes: vessel.fuelRemainingTonnes ?? 900,
+      fuelBurnTonnesPerHour: vessel.fuelBurnTonnesPerHour ?? 0.12,
+      status: 'IDLE',
+      currentNodeId: vessel.startNodeId,
+      assignedCargoIds: [],
+    });
+    this.queue.enqueue({
+      eventId: `available-${vessel.id}-${++this.demandEventCounter}`,
+      simulationTime: this.clock.getTime(),
+      eventType: 'SHIP_AVAILABLE',
+      entityId: vessel.id,
+      locationNodeId: vessel.startNodeId,
+      metadata: {},
+    });
+  }
+
   updateCargo(cargoId: string, updates: Partial<Omit<CargoDefinition, 'id'>>): void {
     const cargo = this.context.getCargo(cargoId);
     if (cargo.status !== 'CREATED') throw new Error(`Cargo ${cargoId} can only be edited before assignment`);
@@ -180,6 +223,19 @@ export class SimulationEngine {
     return this.events;
   }
 
+  forgetTerminalCargoes(cargoIds: readonly string[]): void {
+    for (const cargoId of cargoIds) {
+      const cargo = this.context.cargoes.get(cargoId);
+      if (cargo?.status === 'DELIVERED' || cargo?.status === 'CANCELLED') {
+        this.context.cargoes.delete(cargoId);
+      }
+    }
+  }
+
+  trimEventHistory(maxEvents = 5000): void {
+    if (this.events.length > maxEvents) this.events.splice(0, this.events.length - maxEvents);
+  }
+
   getCurrentSimulationTime(): number {
     return this.clock.getTime();
   }
@@ -194,7 +250,7 @@ export class SimulationEngine {
       cargo.earliestDeparture ?? this.clock.getTime(),
     );
     for (const vessel of this.context.vessels.values()) {
-      if (vessel.status !== 'IDLE' || vessel.currentNodeId !== cargo.origin) continue;
+      if (vessel.status !== 'IDLE') continue;
       const queuedAvailability = this.queue.nextTime('SHIP_AVAILABLE', vessel.vesselId);
       if (queuedAvailability !== undefined && queuedAvailability <= earliestDeparture) continue;
       if (queuedAvailability !== undefined) this.queue.remove('SHIP_AVAILABLE', vessel.vesselId);
@@ -203,7 +259,7 @@ export class SimulationEngine {
         simulationTime: earliestDeparture,
         eventType: 'SHIP_AVAILABLE',
         entityId: vessel.vesselId,
-        locationNodeId: cargo.origin,
+        locationNodeId: vessel.currentNodeId,
         metadata: {},
       });
     }

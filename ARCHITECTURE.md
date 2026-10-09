@@ -596,12 +596,15 @@ From the workspace root, `pnpm rycorn` starts the local API and client together.
 
 ### Audit findings and next work
 
-- The current router checks graph connectivity and vessel capability. It does not test whether an edge crosses land.
-- `data/raw/natural-earth/` currently contains provenance documentation but no coastline geometry. Land avoidance should wait until a versioned coastline dataset is added and its coordinate assumptions are validated.
-- Movement and port handling remain deterministic approximations. Realistic calibration requires sourced vessel-speed and port-operation data; the clock metadata is not a substitute for that model.
+- The server builds demand routes and connector paths from WPI ports, then screens each unique graph edge against Natural Earth 1:10m land geometry at approximately 2 km intervals. First and last port connector edges up to 100 km are exempt because WPI coordinates can lie on land. This is a coarse geometry screen, not a navigational guarantee.
+- The engine router remains geography-agnostic and assumes its input graph is valid. Server-built routes are screened before entering the engine; networks constructed by direct engine callers are not.
+- The continuous global scenario models 14 reciprocal illustrative trade lanes across eight Rycon market regions. Empty vessel repositioning allows a ship to reach demand at another port. It adjusts model volumes deterministically by up to ±10% between cycles and retains bounded recent shipment/event history.
+- Regional assignments come from port country groupings. They are planning categories, not authoritative customs or economic regions. The WPI has no trade volumes or origin-destination matrix; all lane choices and weights remain assumptions until a sourced trade dataset is connected.
+- Demand can be added or edited while the server is running. The server builds a route and connects the new port into the active route graph before handing the demand to the engine. Fleet supply can be added to an initialized engine as well.
+- Movement, fuel use, port handling, and port access remain deterministic approximations. Realistic calibration requires sourced vessel-speed, fuel, port-operation, and trade-flow data. Clock metadata is not a substitute for those models.
 - Display scale, marker size, and label density belong to the client and must not alter physical distance or simulation time.
 
-The practical next sequence is coastline ingestion/edge validation, sourced movement calibration, then any modeled calendar anchor needed for operational dates. Continue to keep observed host time and simulated time distinct.
+The next system work is connecting sourced maritime trade and connectivity data, calibrating movement and port handling, adding route disruption and port capacity models, and validating those extensions against operational observations. Keep observed host time and simulated time distinct.
 
 ---
 
@@ -985,7 +988,7 @@ Base Movement + Weather Model + Current Model + Congestion Model → Effective M
 ```
 
 Base engine must function without these models.
-Stochastic models must support controlled seeds.
+Stochastic models must support controlled seeds. The default scenario now wires seeded weather speed sensitivity, daytime congestion sensitivity, and port handling delay into the engine. These repeatable inputs are illustrative and are not live observations or calibrated forecasts.
 
 ---
 
@@ -1020,6 +1023,8 @@ It must NOT: calculate routes, modify vessel state, execute simulation rules, co
 * Pausing the engine pauses the observed simulation.
 * Same engine runs without visualization.
 * Visualization replaceable without modifying simulation logic.
+
+The map displays engine vessels against the simulation clock. Special-class patrol markers are explicitly labeled fictional route previews and use the same clock rate; they are not included in fleet supply or route assignment.
 
 ---
 

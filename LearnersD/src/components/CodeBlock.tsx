@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
 import { Copy, Check } from 'lucide-react'
 import type { CodeExample } from '../data/lessons'
 import styles from './CodeBlock.module.css'

@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Activity, Anchor, CalendarClock, ClipboardList, Compass, FileText, Globe2, Map as MapIcon, Navigation, Package, Radio, Search, Shield, Ship, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, Anchor, FileText, Globe2, Layers3, Map as MapIcon, Navigation, Package, Radio, Search, Ship, Waves, X } from 'lucide-react';
 import Map from './components/Map';
 import SimulationControls from './components/SimulationControls';
 import EventLog from './components/EventLog';
-import Clock from './components/Clock';
 import DSSystemPage from './components/DSSystemPage';
 import OperationalReport from './components/OperationalReport';
 import OperationsRail from './components/OperationsRail';
 import NextStopPage from './components/NextStopPage';
 import ClockPage from './components/ClockPage';
 import SpecialClassPage from './components/SpecialClassPage';
+import DSGraphPage from './components/DSGraphPage';
 import type { SpecialVesselRecord } from './components/SpecialVesselMarker';
 import { API, WS } from './api';
 
@@ -42,6 +42,33 @@ interface EventRecord {
   locationNodeId: string;
 }
 
+interface PortRecord { portId: string; name: string; country: string; }
+
+function friendlyNode(nodeId: string, ports: PortRecord[]): { name: string; country?: string; id: string } {
+  const portId = nodeId.startsWith('node-') ? nodeId.slice(5) : nodeId;
+  const port = ports.find(item => item.portId === portId);
+  return port ? { name: port.name, country: port.country, id: nodeId } : { name: nodeId, id: nodeId };
+}
+
+function routeGeometryKey(coordinates: [number, number][]): string {
+  const encode = (points: [number, number][]) => points.map(([longitude, latitude]) => `${longitude.toFixed(2)},${latitude.toFixed(2)}`).join('|');
+  const forward = encode(coordinates);
+  const reverse = encode([...coordinates].reverse());
+  return forward < reverse ? forward : reverse;
+}
+
+interface PlannedRouteRecord {
+  requestId: string;
+  originPortId?: string;
+  destinationPortId?: string;
+  coordinates: [number, number][];
+  distanceKm: number;
+  originName?: string;
+  destinationName?: string;
+  originRegionId?: string;
+  destinationRegionId?: string;
+}
+
 interface AppState {
   vessels: VesselRecord[];
   cargoes: CargoRecord[];
@@ -49,7 +76,7 @@ interface AppState {
   simulationTime: number;
   timeMetadata: { observedAtUtc: string; observedAtSource: string } | null;
   connected: boolean;
-  systemStatus: { engineInitialized: boolean; engineRunning: boolean; totalEventsProcessed: number; clockProfileId?: string } | null;
+  systemStatus: { engineInitialized: boolean; engineRunning: boolean; totalEventsProcessed: number; clockProfileId?: string; continuousMode?: boolean; continuousCycle?: number; environment?: { enabled: boolean; seed: string; maxWeatherImpact?: number; congestionEnabled?: boolean; maxPortDelayHours?: number } | null } | null;
   errors: Array<{ message: string; timestamp: number }>;
   startedAt: number | null;
 }
@@ -73,12 +100,13 @@ function ViewNavigation({ view, onChange }: { view: ViewMode; onChange: (next: V
   </nav>;
 }
 
-function DataTable({ view, vessels, cargoes, events, query, onSelectVessel }: {
+function DataTable({ view, vessels, cargoes, events, query, ports, onSelectVessel }: {
   view: Exclude<ViewMode, 'map' | 'routes'>;
   vessels: VesselRecord[];
   cargoes: CargoRecord[];
   events: EventRecord[];
   query: string;
+  ports: PortRecord[];
   onSelectVessel: (vesselId: string) => void;
 }) {
   const normalizedQuery = query.trim().toLowerCase();
@@ -89,7 +117,7 @@ function DataTable({ view, vessels, cargoes, events, query, onSelectVessel }: {
       <header className="data-view-heading"><div><p className="eyebrow">FLEET REGISTER</p><h1>Vessels</h1><p>Operational position and assignment state</p></div><span>{rows.length} vessels</span></header>
       <div className="table-scroll"><table className="operations-table"><thead><tr><th>Vessel</th><th>Class</th><th>Status</th><th>Current node</th><th>Assigned cargo</th></tr></thead><tbody>
         {rows.map(vessel => <tr key={vessel.vesselId} tabIndex={0} onClick={() => onSelectVessel(vessel.vesselId)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onSelectVessel(vessel.vesselId); }}>
-          <td><span className="table-vessel"><Ship size={16} />{vessel.vesselId}</span></td><td>{vessel.vesselCapability}</td><td><span className={`table-status status-${vessel.status.toLowerCase()}`}>{vessel.status.replace('_', ' ')}</span></td><td className="mono">{vessel.currentNodeId}</td><td>{vessel.assignedCargoIds?.join(', ') || '—'}</td>
+          <td><span className="table-vessel"><Ship size={16} />{vessel.vesselId}</span></td><td>{vessel.vesselCapability}</td><td><span className={`table-status status-${vessel.status.toLowerCase()}`}>{vessel.status.replace('_', ' ')}</span></td><td><span className="table-node-name">{friendlyNode(vessel.currentNodeId, ports).name}<small>{friendlyNode(vessel.currentNodeId, ports).id}</small></span></td><td>{vessel.assignedCargoIds?.join(', ') || '—'}</td>
         </tr>)}
       </tbody></table>{rows.length === 0 && <p className="table-empty">No vessels match this view.</p>}</div>
     </section>;
@@ -113,13 +141,22 @@ export default function App() {
   });
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState<string | null>(null);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [clockVisible, setClockVisible] = useState(true);
   const [showPorts, setShowPorts] = useState(true);
   const [showRoutes, setShowRoutes] = useState(true);
   const [showSpecial, setShowSpecial] = useState(true);
+  const [showShips, setShowShips] = useState(true);
+  const [showBunkers, setShowBunkers] = useState(true);
+  const [showTraffic, setShowTraffic] = useState(true);
+  const [showNodeLabels, setShowNodeLabels] = useState(false);
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false);
+  const [followPoint, setFollowPoint] = useState<[number, number] | null>(null);
   const [cameraFollow, setCameraFollow] = useState(false);
   const [projection, setProjection] = useState<'map' | 'globe'>('map');
-  const [plannedRoutes, setPlannedRoutes] = useState<Array<{ requestId: string; coordinates: [number, number][]; distanceKm: number }>>([]);
+  const [plannedRoutes, setPlannedRoutes] = useState<PlannedRouteRecord[]>([]);
   const [specialVessels, setSpecialVessels] = useState<SpecialVesselRecord[]>([]);
+  const [portCatalog, setPortCatalog] = useState<PortRecord[]>([]);
 
   useEffect(() => {
     const syncPage = () => setPage(normalizePath(window.location.pathname));
@@ -128,28 +165,38 @@ export default function App() {
   }, []);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleVessels = state.vessels.filter(vessel => !normalizedQuery || `${vessel.vesselId} ${vessel.currentNodeId} ${vessel.status}`.toLowerCase().includes(normalizedQuery));
+  const visibleVessels = useMemo(() => state.vessels.filter(vessel => {
+    if (!normalizedQuery) return true;
+    const node = friendlyNode(vessel.currentNodeId, portCatalog);
+    return `${vessel.vesselId} ${vessel.currentNodeId} ${node.name} ${node.country ?? ''} ${vessel.status}`.toLowerCase().includes(normalizedQuery);
+  }), [state.vessels, normalizedQuery, portCatalog]);
+  const routeRegionCount = new Set(plannedRoutes.flatMap(route => [route.originRegionId, route.destinationRegionId]).filter((id): id is string => !!id)).size;
+  const tradeLaneCount = new Set(plannedRoutes.map(route => routeGeometryKey(route.coordinates))).size;
 
   const resetSimulation = () => setState(current => ({ ...current, vessels: [], cargoes: [], events: [], simulationTime: 0, timeMetadata: null, errors: [] }));
+  const selectVessel = (vesselId: string) => { setFollowPoint(null); setSelectedVesselId(vesselId); };
   const openDsSystem = () => { window.history.pushState({}, '', '/DS_system'); setPage('/ds_system'); };
   const openSimulation = () => { window.history.pushState({}, '', '/'); setPage('/'); };
-  const openPage = (nextPage: '/next-stop' | '/clock' | '/special-class') => { window.history.pushState({}, '', nextPage); setPage(nextPage); };
+  const openPage = (nextPage: '/next-stop' | '/clock' | '/special-class' | '/ds-graph') => { window.history.pushState({}, '', nextPage); setPage(nextPage); };
+  const followNode = (point: [number, number]) => { setSelectedVesselId(null); setFollowPoint(point); setCameraFollow(true); };
 
   const refreshTopology = async () => {
     try {
-      const [routeResponse, specialResponse] = await Promise.all([
+      const [routeResponse, specialResponse, portResponse] = await Promise.all([
         fetch(`${API}/network/routes`),
         fetch(`${API}/network/special-vessels`),
+        fetch(`${API}/network/ports`),
       ]);
       if (routeResponse.ok) setPlannedRoutes(await routeResponse.json());
       if (specialResponse.ok) setSpecialVessels(await specialResponse.json());
+      if (portResponse.ok) setPortCatalog(await portResponse.json());
     } catch {
       setPlannedRoutes([]);
     }
   };
 
   useEffect(() => {
-    if (page === '/ds_system' || page === '/next-stop' || page === '/clock' || page === '/special-class') return;
+    if (page === '/ds_system' || page === '/ds-graph' || page === '/next-stop' || page === '/clock' || page === '/special-class') return;
     let reconnectTimer: number | undefined;
     let disposed = false;
     let ws: WebSocket;
@@ -164,7 +211,8 @@ export default function App() {
       ws.onerror = () => ws.close();
       ws.onmessage = message => {
         const data = JSON.parse(message.data);
-        if (data.type === 'SIMULATION_EVENT') setState(current => ({ ...current, events: [...current.events, data.event] }));
+        if (data.type === 'SIMULATION_EVENT') setState(current => ({ ...current, events: [...current.events, data.event].slice(-2000) }));
+        if (data.type === 'EVENT_HISTORY') setState(current => ({ ...current, events: (data.events ?? []).slice(-5000) }));
         if (data.type === 'STATE_UPDATE') setState(current => ({
           ...current,
           vessels: data.vessels,
@@ -186,9 +234,10 @@ export default function App() {
 
   useEffect(() => {
     void refreshTopology();
-  }, [state.systemStatus?.engineInitialized]);
+  }, [page, state.systemStatus?.engineInitialized]);
 
   if (page === '/ds_system') return <DSSystemPage onBack={openSimulation} />;
+  if (page === '/ds-graph') return <DSGraphPage onBack={openSimulation} />;
   if (page === '/next-stop') return <NextStopPage onBack={openSimulation} />;
   if (page === '/clock') return <ClockPage onBack={openSimulation} simulationTimeHours={state.simulationTime} timeMetadata={state.timeMetadata} startedAt={state.startedAt} running={!!state.systemStatus?.engineRunning} activeProfileId={state.systemStatus?.clockProfileId} />;
   if (page === '/special-class') return <SpecialClassPage onBack={openSimulation} />;
@@ -200,47 +249,50 @@ export default function App() {
         <span className="brand-mark"><Anchor size={19} strokeWidth={1.8} /></span>
         <span className="brand-copy"><strong>RYCORN</strong><small>MARITIME OPERATIONS</small></span>
       </button>
-      <ViewNavigation view={view} onChange={setView} />
       <div className="topbar-status"><span className={`connection-led ${state.connected ? 'is-connected' : ''}`} /><span>{state.connected ? 'LIVE LINK' : 'OFFLINE'}</span></div>
       <div className="topbar-actions">
-        <button className="header-action" onClick={openDsSystem} aria-label="Open DS System" title="DS System"><ClipboardList size={16} /><span>DS SYSTEM</span></button>
-        <button className="header-action" onClick={() => openPage('/next-stop')} aria-label="Open Next Stop scenario planner" title="Next Stop"><Compass size={16} /><span>NEXT STOP</span></button>
-        <button className="header-action" onClick={() => openPage('/clock')} aria-label="Open clock details" title="Clock details"><CalendarClock size={16} /><span>CLOCK</span></button>
-        <button className="header-action" onClick={() => openPage('/special-class')} aria-label="Open special-class fleet" title="Special-class units"><Shield size={16} /><span>SPECIAL</span></button>
         <button className="header-action header-action-report" onClick={() => setReportOpen(true)} aria-label="Open operational report" title="Operational report"><FileText size={16} /><span>REPORT</span></button>
       </div>
     </header>
 
     <section className="simulation-strip" aria-label="Simulation controls">
       <SimulationControls onReset={resetSimulation} onInitialized={() => void refreshTopology()} initialized={!!state.systemStatus?.engineInitialized} running={!!state.systemStatus?.engineRunning} connected={state.connected} />
-      <Clock simulationTime={state.simulationTime} timeMetadata={state.timeMetadata} />
+      {state.systemStatus?.continuousMode && <div className="strip-events strip-trade-cycle"><Globe2 size={14} /><span>TRADE CYCLE {state.systemStatus.continuousCycle ?? 0}</span></div>}
+      {state.systemStatus?.environment?.enabled && <div className="strip-events" title="Seeded weather, sailing-condition, and port-delay sensitivity models. These are not live observations."><Waves size={14} /><span>MODELED CONDITIONS</span></div>}
       <div className="strip-events"><Radio size={14} /><span>{state.systemStatus?.totalEventsProcessed ?? 0} EVENTS</span></div>
     </section>
 
-    <main className={`workspace workspace-${view}`}>
-      {view === 'map' || view === 'routes' ? <>
-        <section className={`map-stage ${view === 'routes' ? 'map-stage-routes' : ''}`} aria-label={view === 'routes' ? 'Planned sea routes' : 'Fleet map'}>
-          <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} routesOnly={view === 'routes'} projection={view === 'routes' ? 'map' : projection} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />
-          <div className="map-title-overlay"><span className="map-live-pip" /><div><strong>{view === 'routes' ? 'Route atlas' : 'Fleet tracking'}</strong><small>{view === 'routes' ? `${plannedRoutes.length} planned scenario corridors` : `${state.vessels.length} transport vessels · ${plannedRoutes.length} planned routes`}</small></div></div>
-          <label className="map-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search vessel, node, status" aria-label="Search vessels" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}<kbd>/</kbd></label>
-          {view === 'map' && <div className="map-layer-tools" aria-label="Map layers">
-            <button className={projection === 'globe' ? 'is-active' : ''} onClick={() => setProjection(value => value === 'map' ? 'globe' : 'map')} title={projection === 'map' ? 'Switch to globe view' : 'Switch to flat map'} aria-label={projection === 'map' ? 'Switch to globe view' : 'Switch to flat map'} aria-pressed={projection === 'globe'}><Globe2 size={16} /><span>{projection === 'map' ? 'Globe' : 'Map'}</span></button>
-            <button className={showPorts ? 'is-active' : ''} onClick={() => setShowPorts(value => !value)} title="Toggle ports" aria-pressed={showPorts}><Anchor size={16} /><span>Ports</span></button>
-            <button className={showRoutes ? 'is-active' : ''} onClick={() => setShowRoutes(value => !value)} title="Toggle routes" aria-pressed={showRoutes}><Radio size={16} /><span>Routes</span></button>
-            <button className={showSpecial ? 'is-active' : ''} onClick={() => setShowSpecial(value => !value)} title="Toggle special-class patrol fixtures" aria-pressed={showSpecial}><Shield size={16} /><span>Special</span></button>
-            {selectedVesselId && <button className={cameraFollow ? 'is-active' : ''} onClick={() => setCameraFollow(value => !value)} title="Follow selected vessel" aria-pressed={cameraFollow}><Navigation size={16} /><span>Follow</span></button>}
+    <main className={`workspace workspace-${view} ${railCollapsed ? 'has-collapsed-rail' : ''}`}>
+      {view === 'map' || view === 'routes' ? <section className={`map-stage ${view === 'routes' ? 'map-stage-routes' : ''} ${projection === 'globe' && view === 'map' ? 'map-stage-globe' : ''}`} aria-label={view === 'routes' ? 'Planned sea routes' : 'Fleet map'}>
+        <Map vessels={visibleVessels} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} showShips={showShips} showBunkers={showBunkers} showTraffic={showTraffic} showNodeLabels={showNodeLabels} routesOnly={view === 'routes'} projection={view === 'routes' ? 'map' : projection} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} followPoint={followPoint} onSelectVessel={selectVessel} onFollowNode={followNode} simulationTimeHours={state.simulationTime} simulationRunning={!!state.systemStatus?.engineRunning} clockProfileId={state.systemStatus?.clockProfileId} />
+        {projection !== 'globe' && <div className="map-title-overlay"><span className="map-live-pip" /><div><strong>{view === 'routes' ? 'Route atlas' : 'Fleet tracking'}</strong><small>{view === 'routes' ? `${tradeLaneCount} trade lanes · ${routeRegionCount} regions` : `${state.vessels.length.toLocaleString()} vessels · ${tradeLaneCount} planned lanes`}</small></div></div>}
+        {projection !== 'globe' && <label className="map-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search vessel, port, status" aria-label="Search vessels and ports" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}<kbd>/</kbd></label>}
+        {(view === 'map' || view === 'routes') && <div className="map-layer-tools" aria-label="Map controls">
+          {view === 'map' && <button className={projection === 'globe' ? 'is-active' : ''} onClick={() => setProjection(value => value === 'map' ? 'globe' : 'map')} title={projection === 'map' ? 'Switch to globe view' : 'Switch to flat map'} aria-pressed={projection === 'globe'}><Globe2 size={16} /><span>{projection === 'map' ? 'Globe' : 'Map'}</span></button>}
+          <button className={layerMenuOpen ? 'is-active' : ''} onClick={() => setLayerMenuOpen(value => !value)} title="Map layers" aria-expanded={layerMenuOpen}><Layers3 size={16} /><span>Layers</span></button>
+          {view === 'map' && selectedVesselId && <button className={cameraFollow && !followPoint ? 'is-active' : ''} onClick={() => { setFollowPoint(null); setCameraFollow(value => !value); }} title="Center on selected ship" aria-pressed={cameraFollow && !followPoint}><Navigation size={16} /><span>Follow</span></button>}
+          {layerMenuOpen && <div className="map-layer-menu" aria-label="Map layers">
+            {[
+              { label: 'Ships', checked: showShips, change: setShowShips },
+              { label: 'Trade routes', checked: showRoutes, change: setShowRoutes },
+              { label: 'Traffic coloring', checked: showTraffic, change: setShowTraffic },
+              { label: 'Ports', checked: showPorts, change: setShowPorts },
+              { label: 'Port names', checked: showNodeLabels, change: setShowNodeLabels },
+              { label: 'Bunker sites', checked: showBunkers, change: setShowBunkers },
+              { label: 'Special fleet', checked: showSpecial, change: setShowSpecial },
+            ].map(layer => <label key={layer.label}><input type="checkbox" checked={layer.checked} onChange={() => layer.change(value => !value)} /><span>{layer.label}</span></label>)}
           </div>}
-        </section>
-        {view === 'map' && <OperationsRail vessels={state.vessels} cargoes={state.cargoes} events={state.events} errors={state.errors} selectedVesselId={selectedVesselId} onSelectVessel={setSelectedVesselId} />}
-      </> : <>
+        </div>}
+      </section> : <section className="data-workspace-pane">
         <div className="data-toolbar">
           <label className="data-search"><Search size={16} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={`Search ${view}`} aria-label={`Search ${view}`} />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}</label>
           <span className="data-connection"><span className={`connection-led ${state.connected ? 'is-connected' : ''}`} />{state.connected ? 'Live data' : 'Waiting for server'}</span>
         </div>
         {view === 'activity'
           ? <div className="activity-view"><header className="data-view-heading"><div><p className="eyebrow">EVENT STREAM</p><h1>Activity</h1><p>Chronological simulation history</p></div><span>{state.events.length} events</span></header>{state.errors.map((error, index) => <div className="activity-error" key={`${error.timestamp}-${index}`}><strong>Simulation error</strong><span>{error.message}</span><time>{new Date(error.timestamp).toLocaleTimeString()}</time></div>)}<EventLog events={state.events} /></div>
-          : <DataTable view={view} vessels={state.vessels} cargoes={state.cargoes} events={state.events} query={query} onSelectVessel={vesselId => { setSelectedVesselId(vesselId); setView('map'); }} />}
-      </>}
+          : <DataTable view={view} vessels={state.vessels} cargoes={state.cargoes} events={state.events} query={query} ports={portCatalog} onSelectVessel={vesselId => { selectVessel(vesselId); setView('map'); }} />}
+      </section>}
+      <OperationsRail vessels={state.vessels} cargoes={state.cargoes} events={state.events} errors={state.errors} ports={portCatalog} selectedVesselId={selectedVesselId} onSelectVessel={vesselId => { selectVessel(vesselId); setView('map'); }} simulationTime={state.simulationTime} timeMetadata={state.timeMetadata} running={!!state.systemStatus?.engineRunning} clockProfileId={state.systemStatus?.clockProfileId} routesMode={view === 'routes'} routeCount={tradeLaneCount} regionCount={routeRegionCount} collapsed={railCollapsed} onToggleCollapsed={() => setRailCollapsed(value => !value)} clockVisible={clockVisible} onToggleClock={() => setClockVisible(value => !value)} currentView={view} onSelectView={setView} onOpenTool={openPage} onOpenDs={openDsSystem} hideRecentActivity={view === 'activity'} />
     </main>
 
     <nav className="mobile-view-navigation" aria-label="Workspace views"><ViewNavigation view={view} onChange={setView} /></nav>

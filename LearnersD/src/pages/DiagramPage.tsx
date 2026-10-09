@@ -1,14 +1,10 @@
-import { motion } from 'framer-motion'
 import styles from './DiagramPage.module.css'
 
 export default function DiagramPage() {
   return (
     <div className={styles.page}>
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      <div className="fade-up">
+
         <h1 className={styles.title}>🗺️ System Diagram</h1>
         <p className={styles.subtitle}>
           The full Rycorn system — all packages, boundaries, data flows, and dependency directions.
@@ -206,7 +202,7 @@ data/processed/canonical-ports.json   (used at runtime)
             ))}
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

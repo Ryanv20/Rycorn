@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, CheckCircle, XCircle, Clock, BookOpen } from 'lucide-react'
-import { lessons, categories, type Lesson, type QuizQuestion } from '../data/lessons'
+import { lessons, categories, type QuizQuestion } from '../data/lessons'
 import CodeBlock from '../components/CodeBlock'
 import type { Route } from '../App'
 import styles from './LessonPage.module.css'
@@ -71,8 +71,8 @@ export default function LessonPage({ id, navigate }: Props) {
               {section.title}
             </h2>
             <ContentRenderer content={section.content} />
-            {(section as { content2?: string }).content2 && (
-              <ContentRenderer content={(section as { content2?: string }).content2!} />
+            {section.content2 && (
+              <ContentRenderer content={section.content2} />
             )}
             {section.diagram && (
               <pre className={styles.diagram}>{section.diagram}</pre>

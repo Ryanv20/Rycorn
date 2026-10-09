@@ -1,10 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { simulationStream } from '../websocket/SimulationStream.js';
+import { dsStore } from '../dsStore.js';
 import { DEMO_PORTS } from '../demo/demoNetwork.js';
 import { getDemoNetwork } from '../demo/demoNetwork.js';
 import { getCanonicalPorts } from '../data/portCatalog.js';
 import { getActiveScenario } from '../maritime/activeScenario.js';
 import { getSpecialVessels } from '../maritime/specialVessels.js';
+import { getTradeRegionId, listTradeRegions } from '../maritime/TradeRegions.js';
 
 export default async function networkRoutes(fastify: FastifyInstance) {
   const bunkerPortIds = new Set(['19WPI-50000', '19WPI-16080', '19WPI-18150', '19WPI-53650', '19WPI-46850']);
@@ -33,13 +35,21 @@ export default async function networkRoutes(fastify: FastifyInstance) {
     return nodes;
   });
 
-  fastify.get('/network/ports', async () => getCanonicalPorts());
+  fastify.get('/network/ports', async () => getCanonicalPorts().map(port => ({
+    ...port,
+    regionId: getTradeRegionId(port),
+  })));
+
+  fastify.get('/network/regions', async () => listTradeRegions(getCanonicalPorts()));
 
   fastify.get('/network/bunker-spots', async () => getCanonicalPorts()
     .filter(port => bunkerPortIds.has(port.portId))
     .map(port => ({ ...port, serviceType: 'SIMULATED_BUNKER_STATION', sourceNote: 'Scenario bunker fixture; not verified from WPI facilities.' })));
 
-  fastify.get('/network/routes', async () => getActiveScenario()?.plannedRoutes ?? []);
+  fastify.get('/network/routes', async () => {
+    const cancelled = new Set(dsStore.getCargoDemands().filter(demand => demand.status === 'CANCELLED').map(demand => demand.requestId));
+    return (getActiveScenario()?.plannedRoutes ?? []).filter(route => !cancelled.has(route.requestId));
+  });
 
   fastify.get('/network/special-vessels', async () => getSpecialVessels());
 

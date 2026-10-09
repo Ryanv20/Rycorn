@@ -4,7 +4,8 @@ import type { CargoDemand } from '@rycon/ds-system';
 import type { EdgeId, NetworkEdge, NetworkNode } from '@rycon/engine';
 import type { NodeId } from '@rycon/engine';
 import { getCanonicalPorts, getPortByNodeId, type CanonicalPortRecord } from '../data/portCatalog.js';
-import { screenRouteAgainstLand } from './CoastlineScreen.js';
+import { screenNetworkEdgesAgainstLand } from './CoastlineScreen.js';
+import { getTradeRegionId } from './TradeRegions.js';
 
 interface SeaRouteFeature {
   type: 'Feature';
@@ -22,10 +23,12 @@ export interface PlannedRoute {
   destinationPortId: string;
   originName: string;
   destinationName: string;
+  originRegionId: string;
+  destinationRegionId: string;
   distanceKm: number;
   pathNodeIds: string[];
   coordinates: [number, number][];
-  coastlineScreen: { clear: boolean; dataset: string };
+  coastlineScreen: { clear: boolean; dataset: string; warning?: string };
   previewOnly: true;
 }
 
@@ -87,10 +90,16 @@ function stableRouteId(requestId: string): string {
   return requestId.replace(/[^A-Za-z0-9-]/g, '-');
 }
 
-export async function buildScenarioNetwork(demands: readonly CargoDemand[]): Promise<ScenarioNetwork> {
+export async function buildScenarioNetwork(
+  demands: readonly CargoDemand[],
+  vesselPortNodeIds: readonly string[] = [],
+  routeIdentitySuffix = '',
+): Promise<ScenarioNetwork> {
   const network = new MaritimeNetwork();
-  const routePlans: PlannedRoute[] = [];
+  const routePlans: Array<Omit<PlannedRoute, 'coastlineScreen'>> = [];
   const portNodes = new Map<string, NetworkNode>();
+  const portConnectorPairs = new Set<string>();
+  const endpointApproachExemptions = new Map<string, { fromStartKm: number; fromEndKm: number }>();
 
   const getOrAddPortNode = (port: CanonicalPortRecord): NetworkNode => {
     const existing = portNodes.get(port.portId);
@@ -106,7 +115,32 @@ export async function buildScenarioNetwork(demands: readonly CargoDemand[]): Pro
     return node;
   };
 
-  for (const demand of demands) {
+  const demandPortNodes = [...new Set(demands.flatMap(demand => [demand.origin, demand.destination]))];
+  const additionalVesselPortNodes = [...new Set(vesselPortNodeIds)].filter(nodeId => !demandPortNodes.includes(nodeId));
+  const anchorNodeId = demandPortNodes[0] ?? additionalVesselPortNodes[0];
+  const connectorDestinations = demandPortNodes.length > 0
+    ? additionalVesselPortNodes
+    : additionalVesselPortNodes.slice(1);
+  const connectorDemands: CargoDemand[] = anchorNodeId
+    ? connectorDestinations.map((destination, index) => ({
+      requestId: `NETWORK-CONNECTOR-${String(index + 1).padStart(3, '0')}`,
+      origin: anchorNodeId,
+      destination,
+      quantity: 1,
+      earliestDeparture: 0,
+      deadline: 1,
+      cargoType: 'GENERAL',
+      status: 'PENDING',
+    }))
+    : [];
+  const connectorIds = new Set(connectorDemands.map(demand => demand.requestId));
+  for (const nodeId of vesselPortNodeIds) {
+    const port = getPortByNodeId(nodeId);
+    if (!port) throw new Error(`Fleet references an unknown WPI port at ${nodeId}`);
+    getOrAddPortNode(port);
+  }
+
+  for (const demand of [...demands, ...connectorDemands]) {
     const origin = getPortByNodeId(demand.origin);
     const destination = getPortByNodeId(demand.destination);
     if (!origin || !destination) throw new Error(`Scenario ${demand.requestId} references an unknown WPI port`);
@@ -115,20 +149,11 @@ export async function buildScenarioNetwork(demands: readonly CargoDemand[]): Pro
     if (!seaLine || seaLine.geometry.coordinates.length < 2) {
       throw new Error(`No generalized sea-lane path found for ${demand.requestId}`);
     }
-    const routeCoordinates = [
-      [origin.longitude, origin.latitude] as [number, number],
-      ...seaLine.geometry.coordinates,
-      [destination.longitude, destination.latitude] as [number, number],
-    ];
-    const coastlineScreen = await screenRouteAgainstLand(routeCoordinates);
-    if (!coastlineScreen.clear) {
-      throw new Error(`Sea-lane preview ${demand.requestId} segment ${coastlineScreen.crossingSegment} intersects Natural Earth land geometry`);
-    }
-
+    const coordinates = seaLine.geometry.coordinates;
     const originNode = getOrAddPortNode(origin);
     const destinationNode = getOrAddPortNode(destination);
-    const routeId = stableRouteId(demand.requestId);
-    const intermediateNodes: NetworkNode[] = seaLine.geometry.coordinates.map((coordinate, index) => {
+    const routeId = stableRouteId(routeIdentitySuffix ? `${demand.requestId}-${routeIdentitySuffix}` : demand.requestId);
+    const intermediateNodes: NetworkNode[] = coordinates.map((coordinate, index) => {
       const [longitude, latitude] = coordinate;
       const node: NetworkNode = {
         id: `sea-${routeId}-${index}` as NodeId,
@@ -140,28 +165,61 @@ export async function buildScenarioNetwork(demands: readonly CargoDemand[]): Pro
     });
     const path = [originNode, ...intermediateNodes, destinationNode];
 
+    const routeSegmentLengths = path.slice(1).map((node, index) => distanceKm(
+      [path[index].position.longitude, path[index].position.latitude],
+      [node.position.longitude, node.position.latitude],
+    ));
+    const routeDistanceKm = routeSegmentLengths.reduce((total, length) => total + length, 0);
+    let distanceFromOriginKm = 0;
+
     for (let index = 0; index < path.length - 1; index += 1) {
       addBidirectionalEdge(network, path[index], path[index + 1], `route-${routeId}-${index}`);
+      const length = routeSegmentLengths[index];
+      const pair = [path[index].id, path[index + 1].id].sort().join('|');
+      endpointApproachExemptions.set(pair, {
+        fromStartKm: Math.max(0, Math.min(length, 30 - distanceFromOriginKm)),
+        fromEndKm: Math.max(0, Math.min(length, 30 - (routeDistanceKm - distanceFromOriginKm - length))),
+      });
+      if (index === 0 || index === path.length - 2) {
+        portConnectorPairs.add(pair);
+      }
+      distanceFromOriginKm += length;
     }
 
-    routePlans.push({
-      requestId: demand.requestId,
-      originPortId: origin.portId,
-      destinationPortId: destination.portId,
-      originName: origin.name,
-      destinationName: destination.name,
-      distanceKm: seaLine.properties.length ?? path.slice(1).reduce((total, node, index) => total + distanceKm(
-        [path[index].position.longitude, path[index].position.latitude],
-        [node.position.longitude, node.position.latitude],
-      ), 0),
-      pathNodeIds: path.map(node => node.id),
-      coordinates: path.map(node => [node.position.longitude, node.position.latitude]),
-      coastlineScreen,
-      previewOnly: true,
-    });
+    if (!connectorIds.has(demand.requestId) && !demand.requestId.startsWith('NETWORK-CONNECTOR-')) {
+      routePlans.push({
+        requestId: demand.requestId,
+        originPortId: origin.portId,
+        destinationPortId: destination.portId,
+        originName: origin.name,
+        destinationName: destination.name,
+        originRegionId: getTradeRegionId(origin),
+        destinationRegionId: getTradeRegionId(destination),
+        distanceKm: routeDistanceKm,
+        pathNodeIds: path.map(node => node.id),
+        coordinates: path.map(node => [node.position.longitude, node.position.latitude]),
+        previewOnly: true,
+      });
+    }
   }
 
-  return { network, plannedRoutes: routePlans };
+  const networkScreen = await screenNetworkEdgesAgainstLand(network, portConnectorPairs, endpointApproachExemptions);
+  if (networkScreen.reason === 'Edge references a missing network node') {
+    throw new Error(`Network edge ${networkScreen.crossingEdgeId}: ${networkScreen.reason}`);
+  }
+  const coordinateText = networkScreen.crossingCoordinates
+    ?.map(([longitude, latitude]) => `${longitude.toFixed(4)},${latitude.toFixed(4)}`)
+    .join(' → ');
+  const coastlineWarning = networkScreen.clear ? undefined
+    : `Generalized route preview flagged by coastline screening at ${networkScreen.crossingEdgeId}: ${networkScreen.reason ?? 'unknown crossing'}${coordinateText ? ` (${coordinateText})` : ''}.`;
+
+  return {
+    network,
+    plannedRoutes: routePlans.map(route => ({
+      ...route,
+      coastlineScreen: { clear: networkScreen.clear, dataset: networkScreen.dataset, warning: coastlineWarning },
+    })),
+  };
 }
 
 export function listAllPorts() {

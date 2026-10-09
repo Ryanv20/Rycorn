@@ -12,6 +12,17 @@ export const scenarioPlanSchema = z.object({
   assumptions: z.array(z.string().min(1)),
   limitations: z.array(z.string().min(1)),
   sourceNote: z.string().min(1),
+  regionBreakdown: z.array(z.object({
+    regionId: z.string().min(1),
+    regionName: z.string().min(1),
+    flowCount: z.number().int().nonnegative(),
+    modelUnits: z.number().nonnegative(),
+  })).default([]),
+  cycleModel: z.object({
+    label: z.string().min(1),
+    volumeVariationPercent: z.number().nonnegative(),
+    note: z.string().min(1),
+  }).optional(),
   cargoDemands: z.array(cargoDemandSchema),
   fleetCount: z.number().int().positive(),
   routePreviewOnly: z.literal(true),

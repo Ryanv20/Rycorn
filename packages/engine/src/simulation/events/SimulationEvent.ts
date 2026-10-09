@@ -8,6 +8,8 @@ export type EventType =
   | 'UNLOAD_STARTED'
   | 'UNLOAD_COMPLETED'
   | 'SHIP_AVAILABLE'
+  | 'REPOSITION_STARTED'
+  | 'REPOSITION_ARRIVED'
   | 'BUNKERING_COMPLETED';
 
 export interface SimulationEvent {

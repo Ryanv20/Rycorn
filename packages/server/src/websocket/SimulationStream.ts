@@ -1,5 +1,5 @@
-import { SimulationEngine, type CargoDefinition, type SimulationInput } from '@rycon/engine';
-import type { CargoDemand, DemandStatus } from '@rycon/ds-system';
+import { SimulationEngine, VesselCapability, type CargoDefinition, type EnvironmentConfig, type SimulationInput } from '@rycon/engine';
+import type { CargoDemand, DemandStatus, VesselSupply } from '@rycon/ds-system';
 import { getDemoNetwork, DEMO_VESSELS, DEMO_CARGOES } from '../demo/demoNetwork.js';
 import { dsStore } from '../dsStore.js';
 
@@ -22,6 +22,22 @@ export interface SystemStatus {
   startedAt:         number | null;
   uptime:            number;
   clockProfileId:    ClockProfileId;
+  continuousMode: boolean;
+  continuousCycle:   number;
+  environment?: EnvironmentConfig | null;
+}
+
+export interface TradeCycleSummary {
+  cycleNumber: number;
+  startedAtSimulationHour: number;
+  completedAtSimulationHour: number;
+  demandCount: number;
+  deliveredCount: number;
+  lateCount: number;
+  failedCount: number;
+  outstandingCount: number;
+  modelUnits: number;
+  regionalModelUnits: Record<string, number>;
 }
 
 export interface TimeMetadata {
@@ -70,14 +86,31 @@ export class SimulationStream {
   private timeObservations: TimeMetadata[] = [];
   private continuousTemplate: CargoDemand[] = [];
   private continuousCycle = 0;
+  private continuousRunNumber = 0;
+  private currentCycleDemands: CargoDemand[] = [];
+  private currentCycleStartedAt = 0;
+  private tradeCycleSummaries: TradeCycleSummary[] = [];
+  private environmentProfile: EnvironmentConfig | null = null;
 
   // ── Connection management ──────────────────────────────────────────────
   addConnection(conn: WebSocketConnection): void {
     this.connections.add(conn);
     conn.on('close', () => this.connections.delete(conn));
 
-    // Send current status immediately on connect
+    // Send a usable snapshot on connect so refreshed clients can populate the
+    // fleet, charts, and logbook without waiting for the next simulation event.
     this.sendTo(conn, { type: 'ADMIN', payload: this.getSystemStatus() });
+    const state = this.getStatus();
+    if (state) {
+      this.sendTo(conn, {
+        type: 'STATE_UPDATE',
+        vessels: Array.from(state.vessels.values()),
+        cargoes: Array.from(state.cargoes.values()),
+        simulationTime: state.simulationTime,
+      });
+      this.sendTo(conn, { type: 'EVENT_HISTORY', events: this.getEvents() });
+    }
+    this.sendTo(conn, { type: 'ERROR_LOG', errors: this.getErrors() });
     this.broadcastConnectionCount();
   }
 
@@ -94,6 +127,11 @@ export class SimulationStream {
     this.startedAt = Date.now();
     this.errors = [];
     this.timeObservations = [];
+    this.continuousTemplate = [];
+    this.continuousCycle = 0;
+    this.currentCycleDemands = [];
+    this.tradeCycleSummaries = [];
+    this.environmentProfile = input?.config?.environment ?? null;
 
     // Always use the server-built network — never trust a network from the client
     this.engine.initialize({
@@ -134,6 +172,22 @@ export class SimulationStream {
     return true;
   }
 
+  addVessel(vessel: VesselSupply): boolean {
+    if (!this.engine) return false;
+    this.engine.addVessel({
+      id: vessel.id,
+      capability: VesselCapability[vessel.capability],
+      startNodeId: vessel.startNodeId,
+      vesselType: vessel.vesselType,
+      deadweightTonnes: vessel.deadweightTonnes,
+      fuelCapacityTonnes: vessel.fuelCapacityTonnes,
+      fuelRemainingTonnes: vessel.fuelRemainingTonnes,
+      fuelBurnTonnesPerHour: vessel.fuelBurnTonnesPerHour,
+    });
+    if (!this.engineRunning && this.resumeOnDemand) this.run();
+    return true;
+  }
+
   updateDemand(demand: CargoDemand): boolean {
     if (!this.engine?.getState().cargoes.has(demand.requestId)) return false;
     this.engine.updateCargo(demand.requestId, this.toCargoDefinition(demand));
@@ -163,6 +217,7 @@ export class SimulationStream {
       this.eventsProcessed++;
       const timeMetadata = this.createTimeMetadata(event.simulationTime, event.eventId);
       this.timeObservations.push(timeMetadata);
+      if (this.timeObservations.length > 5000) this.timeObservations.splice(0, this.timeObservations.length - 5000);
       this.broadcast({ type: 'SIMULATION_EVENT', event, timestamp: timeMetadata.observedAtEpochMs, timeMetadata });
       this.broadcastStateUpdate(event.simulationTime, timeMetadata);
       this.broadcast({ type: 'ADMIN', payload: this.getSystemStatus() });
@@ -180,6 +235,12 @@ export class SimulationStream {
     this.errors = [];
     this.timeObservations = [];
     this.resumeOnDemand = false;
+    this.continuousTemplate = [];
+    this.continuousCycle = 0;
+    this.currentCycleDemands = [];
+    this.currentCycleStartedAt = 0;
+    this.tradeCycleSummaries = [];
+    this.environmentProfile = null;
     this.broadcast({ type: 'ADMIN', payload: this.getSystemStatus() });
   }
 
@@ -196,7 +257,12 @@ export class SimulationStream {
 
   setContinuousDemands(demands: readonly CargoDemand[] | null): void {
     this.continuousTemplate = demands ? [...demands] : [];
-    this.continuousCycle = 0;
+    this.continuousCycle = demands ? 1 : 0;
+    this.continuousRunNumber += 1;
+    this.currentCycleDemands = demands ? [...demands] : [];
+    this.currentCycleStartedAt = 0;
+    this.tradeCycleSummaries = [];
+    this.broadcast({ type: 'ADMIN', payload: this.getSystemStatus() });
   }
 
   getClockProfile(): ClockProfile {
@@ -220,6 +286,10 @@ export class SimulationStream {
     return [...this.timeObservations];
   }
 
+  getTradeCycleSummaries(): TradeCycleSummary[] {
+    return [...this.tradeCycleSummaries];
+  }
+
   getErrors() {
     return this.errors;
   }
@@ -233,6 +303,9 @@ export class SimulationStream {
       startedAt:            this.startedAt,
       uptime:               this.startedAt ? Date.now() - this.startedAt : 0,
       clockProfileId:       this.clockProfileId,
+      continuousMode:       this.continuousTemplate.length > 0,
+      continuousCycle:      this.continuousCycle,
+      environment:          this.environmentProfile,
     };
   }
 
@@ -281,10 +354,13 @@ export class SimulationStream {
     const status = nextStatus[event.eventType];
     const cargoIds = event.metadata.cargoIds;
     if (!status || !Array.isArray(cargoIds)) return;
+    const lateCargoIds = new Set(Array.isArray(event.metadata.lateCargoIds)
+      ? event.metadata.lateCargoIds.filter((cargoId): cargoId is string => typeof cargoId === 'string')
+      : []);
     for (const cargoId of cargoIds) {
       if (typeof cargoId !== 'string') continue;
       const demand = dsStore.getCargoDemands().find(item => item.requestId === cargoId);
-      if (demand) dsStore.setDemandStatus(cargoId, status);
+      if (demand) dsStore.setDemandStatus(cargoId, event.eventType === 'UNLOAD_COMPLETED' && lateCargoIds.has(cargoId) ? 'DELIVERED_LATE' : status);
     }
   }
 
@@ -326,17 +402,32 @@ export class SimulationStream {
     const nextEventTime = this.engine.getNextEventTime();
     if (nextEventTime === undefined) {
       if (this.engineRunning && this.continuousTemplate.length > 0) {
+        this.completeCurrentTradeCycle();
         this.continuousCycle += 1;
-        for (const demand of this.continuousTemplate) {
-          const nextDemand: CargoDemand = {
+        const laneVariations = new Map<string, number>();
+        const nextDemands: CargoDemand[] = this.continuousTemplate.map((demand, index) => {
+          const laneKey = demand.tradeLaneId ?? demand.requestId;
+          let variationPercent = laneVariations.get(laneKey);
+          if (variationPercent === undefined) {
+            variationPercent = ((this.continuousCycle * 7 + index * 11) % 21) - 10;
+            laneVariations.set(laneKey, variationPercent);
+          }
+          return {
             ...demand,
-            requestId: `${demand.requestId}-C${String(this.continuousCycle).padStart(4, '0')}`,
-            earliestDeparture: this.engine.getCurrentSimulationTime(),
+            requestId: `${demand.requestId}-R${this.continuousRunNumber}-C${String(this.continuousCycle).padStart(4, '0')}`,
+            quantity: Math.max(1, Math.round(demand.quantity * (1 + variationPercent / 100))),
+            earliestDeparture: this.engine!.getCurrentSimulationTime() + index * 0.25,
+            cycleNumber: this.continuousCycle,
             status: 'PENDING',
           };
+        });
+        this.currentCycleDemands = nextDemands;
+        this.currentCycleStartedAt = this.engine.getCurrentSimulationTime();
+        for (const nextDemand of nextDemands) {
           dsStore.addDemand(nextDemand);
           this.engine.addCargo(this.toCargoDefinition(nextDemand));
         }
+        dsStore.retainContinuousCycles(this.continuousCycle);
         this.scheduleNextEvent();
         return;
       }
@@ -356,6 +447,41 @@ export class SimulationStream {
         this.pause();
       }
     }, delayMs);
+  }
+
+  private completeCurrentTradeCycle(): void {
+    if (!this.engine || this.currentCycleDemands.length === 0) return;
+    const demands = this.currentCycleDemands;
+    for (const demand of demands) {
+      const stored = dsStore.getCargoDemands().find(item => item.requestId === demand.requestId);
+      if (stored?.status !== 'PENDING') continue;
+      this.engine.cancelCargo(demand.requestId);
+      dsStore.updateDemand(demand.requestId, { failureReason: 'No eligible vessel was assigned before this trade cycle closed.' });
+      dsStore.setDemandStatus(demand.requestId, 'FAILED');
+    }
+    const demandRecords = new Map(dsStore.getCargoDemands().map(demand => [demand.requestId, demand]));
+    const statuses = demands.map(demand => demandRecords.get(demand.requestId)?.status);
+    const regionalModelUnits: Record<string, number> = {};
+    for (const demand of demands) {
+      const regionId = demand.originRegionId ?? 'unclassified';
+      regionalModelUnits[regionId] = (regionalModelUnits[regionId] ?? 0) + demand.quantity;
+    }
+    this.tradeCycleSummaries.push({
+      cycleNumber: this.continuousCycle,
+      startedAtSimulationHour: this.currentCycleStartedAt,
+      completedAtSimulationHour: this.engine.getCurrentSimulationTime(),
+      demandCount: demands.length,
+      deliveredCount: statuses.filter(status => status === 'DELIVERED' || status === 'DELIVERED_LATE').length,
+      lateCount: statuses.filter(status => status === 'DELIVERED_LATE').length,
+      failedCount: statuses.filter(status => status === 'FAILED').length,
+      outstandingCount: statuses.filter(status => status === 'PENDING' || status === 'ASSIGNED' || status === 'IN_TRANSIT').length,
+      modelUnits: demands.reduce((sum, demand) => sum + demand.quantity, 0),
+      regionalModelUnits,
+    });
+    if (this.tradeCycleSummaries.length > 24) this.tradeCycleSummaries.splice(0, this.tradeCycleSummaries.length - 24);
+    this.engine.forgetTerminalCargoes(demands.map(demand => demand.requestId));
+    this.engine.trimEventHistory(5000);
+    dsStore.retainContinuousCycles(this.continuousCycle);
   }
 
   private createTimeMetadata(simulationTimeHours: number, eventId?: string): TimeMetadata {

@@ -14,6 +14,7 @@ import { VesselCapability } from '../../domain/network/VesselCapability';
 
 export class EventProcessor {
   private eventCounter = 0;
+  private reservedCargoIds = new Set<string>();
   private capacityPolicy: CapacityPolicy;
   private portCapacityPolicy: PortCapacityPolicy;
   private cargoCompatibilityPolicy: CargoCompatibilityPolicy;
@@ -66,6 +67,12 @@ export class EventProcessor {
       case 'SHIP_AVAILABLE':
         this.handleShipAvailable(event);
         break;
+      case 'REPOSITION_STARTED':
+        this.handleRepositionStarted(event);
+        break;
+      case 'REPOSITION_ARRIVED':
+        this.handleRepositionArrived(event);
+        break;
       case 'BUNKERING_COMPLETED':
         this.handleBunkeringCompleted(event);
         break;
@@ -74,9 +81,14 @@ export class EventProcessor {
 
   private handleShipAssigned(event: SimulationEvent) {
     const vessel = this.context.getVessel(event.entityId);
+    const cargoIds = (event.metadata.cargoIds as string[]).filter(cargoId => {
+      const cargo = this.context.cargoes.get(cargoId);
+      this.reservedCargoIds.delete(cargoId);
+      return cargo?.status === 'CREATED';
+    });
+    if (cargoIds.length === 0) return;
     StateMachine.transitionVessel(vessel.status, 'ASSIGNED');
-    
-    const cargoIds = event.metadata.cargoIds as string[];
+
     for (const cargoId of cargoIds) {
       const cargo = this.context.getCargo(cargoId);
       StateMachine.transitionCargo(cargo.status, 'ASSIGNED');
@@ -167,7 +179,11 @@ export class EventProcessor {
     if (fuelRemainingTonnes < fuelBurnTonnes) {
       throw new Error(`Vessel ${vessel.vesselId} requires ${fuelBurnTonnes.toFixed(1)} t fuel but has ${fuelRemainingTonnes.toFixed(1)} t`);
     }
-    this.context.updateVessel(vessel.vesselId, { fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes });
+    this.context.updateVessel(vessel.vesselId, {
+      fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes,
+      currentVoyageStartedAt: event.simulationTime,
+      expectedArrivalAt: event.simulationTime + estimate.durationHours,
+    });
     
     this.queue.enqueue({
       eventId: this.createEventId(),
@@ -245,21 +261,31 @@ export class EventProcessor {
       eventType: 'UNLOAD_COMPLETED',
       entityId: vessel.vesselId,
       locationNodeId: event.locationNodeId,
-      metadata: event.metadata
+      metadata: { ...event.metadata }
     });
   }
 
   private handleUnloadCompleted(event: SimulationEvent) {
     const vessel = this.context.getVessel(event.entityId);
     StateMachine.transitionVessel(vessel.status, 'IDLE');
-    
+    const lateCargoIds: string[] = [];
     for (const cid of vessel.assignedCargoIds) {
       const cargo = this.context.getCargo(cid);
       StateMachine.transitionCargo(cargo.status, 'DELIVERED');
-      this.context.updateCargo(cid, { status: 'DELIVERED', assignedVesselId: undefined });
+      const latenessHours = cargo.deadline === undefined ? undefined : Math.max(0, event.simulationTime - cargo.deadline);
+      const deadlineMet = latenessHours === undefined ? undefined : latenessHours === 0;
+      if (deadlineMet === false) lateCargoIds.push(cid);
+      this.context.updateCargo(cid, { status: 'DELIVERED', assignedVesselId: undefined, deadlineMet, latenessHours });
     }
+    event.metadata.lateCargoIds = lateCargoIds;
     
-    this.context.updateVessel(vessel.vesselId, { status: 'IDLE', assignedCargoIds: [], currentRoute: undefined });
+    this.context.updateVessel(vessel.vesselId, {
+      status: 'IDLE',
+      assignedCargoIds: [],
+      currentRoute: undefined,
+      currentVoyageStartedAt: undefined,
+      expectedArrivalAt: undefined,
+    });
     
     // Free the berth when unloading is complete
     this.portCapacityPolicy.vesselDeparted(event.locationNodeId);
@@ -294,29 +320,65 @@ export class EventProcessor {
     let nextCargoTime = Infinity;
 
     for (const cargo of this.context.cargoes.values()) {
-      if (cargo.status === 'CREATED' && cargo.originNodeId === vessel.currentNodeId) {
+      if (cargo.status === 'CREATED'
+        && !this.reservedCargoIds.has(cargo.cargoId)
+        && this.cargoCompatibilityPolicy.isCompatible(cargo.cargoType ?? 'GENERAL', vessel.vesselCapability)
+        && this.capacityPolicy.canAccept(vessel.vesselCapability, 0, cargo.quantity || 100)) {
         const earliestDeparture = cargo.earliestDeparture ?? 0;
         if (earliestDeparture > event.simulationTime) {
           nextCargoTime = Math.min(nextCargoTime, earliestDeparture);
           continue;
         }
-        if (!this.cargoCompatibilityPolicy.isCompatible(cargo.cargoType ?? 'GENERAL', vessel.vesselCapability)) continue;
+        if (cargo.originNodeId !== vessel.currentNodeId) continue;
         
-        if (this.capacityPolicy.canAccept(vessel.vesselCapability, 0, cargo.quantity || 100)) {
-          this.queue.enqueue({
-            eventId: this.createEventId(),
-            simulationTime: event.simulationTime,
-            eventType: 'SHIP_ASSIGNED',
-            entityId: vessel.vesselId,
-            locationNodeId: vessel.currentNodeId,
-            metadata: { cargoIds: [cargo.cargoId] }
-          });
-          return;
-        }
+        this.reservedCargoIds.add(cargo.cargoId);
+        this.queue.enqueue({
+          eventId: this.createEventId(),
+          simulationTime: event.simulationTime,
+          eventType: 'SHIP_ASSIGNED',
+          entityId: vessel.vesselId,
+          locationNodeId: vessel.currentNodeId,
+          metadata: { cargoIds: [cargo.cargoId] }
+        });
+        return;
       }
     }
 
     const queuedAvailability = this.queue.nextTime('SHIP_AVAILABLE', vessel.vesselId);
+    let nearestReposition: { cargoId: string; routeDistance: number; routePath: NodeId[] } | undefined;
+    for (const cargo of this.context.cargoes.values()) {
+      if (cargo.status !== 'CREATED'
+        || this.reservedCargoIds.has(cargo.cargoId)
+        || cargo.originNodeId === vessel.currentNodeId
+        || (cargo.earliestDeparture ?? 0) > event.simulationTime
+        || !this.cargoCompatibilityPolicy.isCompatible(cargo.cargoType ?? 'GENERAL', vessel.vesselCapability)
+        || !this.capacityPolicy.canAccept(vessel.vesselCapability, 0, cargo.quantity || 100)) continue;
+      const route = this.router.findRoute({
+        origin: vessel.currentNodeId as NodeId,
+        destination: cargo.originNodeId as NodeId,
+        vesselCapability: vessel.vesselCapability,
+      });
+      if (!route.found) continue;
+      if (!nearestReposition || route.totalDistanceKm < nearestReposition.routeDistance) {
+        nearestReposition = { cargoId: cargo.cargoId, routeDistance: route.totalDistanceKm, routePath: route.path };
+      }
+    }
+    if (nearestReposition) {
+      this.reservedCargoIds.add(nearestReposition.cargoId);
+      this.queue.enqueue({
+        eventId: this.createEventId(),
+        simulationTime: event.simulationTime,
+        eventType: 'REPOSITION_STARTED',
+        entityId: vessel.vesselId,
+        locationNodeId: vessel.currentNodeId,
+        metadata: {
+          cargoIds: [nearestReposition.cargoId],
+          routeNodeIds: nearestReposition.routePath,
+          distanceKm: nearestReposition.routeDistance,
+        },
+      });
+      return;
+    }
     if (Number.isFinite(nextCargoTime) && (queuedAvailability === undefined || nextCargoTime < queuedAvailability)) {
       if (queuedAvailability !== undefined) this.queue.remove('SHIP_AVAILABLE', vessel.vesselId);
       this.queue.enqueue({
@@ -341,6 +403,83 @@ export class EventProcessor {
       entityId: vessel.vesselId,
       locationNodeId: event.locationNodeId,
       metadata: { bunkeringComplete: true },
+    });
+  }
+
+  private handleRepositionStarted(event: SimulationEvent): void {
+    const vessel = this.context.getVessel(event.entityId);
+    const cargoIds = Array.isArray(event.metadata.cargoIds)
+      ? event.metadata.cargoIds.filter((cargoId): cargoId is string => typeof cargoId === 'string')
+      : [];
+    const cargo = cargoIds.map(cargoId => this.context.cargoes.get(cargoId)).find(item => item?.status === 'CREATED');
+    if (!cargo) {
+      cargoIds.forEach(cargoId => this.reservedCargoIds.delete(cargoId));
+      return;
+    }
+    const route = this.router.findRoute({
+      origin: vessel.currentNodeId as NodeId,
+      destination: cargo.originNodeId as NodeId,
+      vesselCapability: vessel.vesselCapability,
+    });
+    if (!route.found) throw new Error(`Cannot reposition ${vessel.vesselId} to ${cargo.originNodeId}`);
+    const estimate = this.movement.calculate(route, vessel.vesselCapability, event.simulationTime);
+    const fuelBurnTonnes = estimate.durationHours * (vessel.fuelBurnTonnesPerHour ?? 0);
+    const fuelRemainingTonnes = vessel.fuelRemainingTonnes ?? Infinity;
+    if (fuelRemainingTonnes < fuelBurnTonnes) {
+      throw new Error(`Vessel ${vessel.vesselId} needs ${fuelBurnTonnes.toFixed(1)} t fuel to reposition but has ${fuelRemainingTonnes.toFixed(1)} t`);
+    }
+    StateMachine.transitionVessel(vessel.status, 'REPOSITIONING');
+    this.context.updateVessel(vessel.vesselId, {
+      status: 'REPOSITIONING',
+      currentRoute: route,
+      fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes,
+      currentVoyageStartedAt: event.simulationTime,
+      expectedArrivalAt: event.simulationTime + estimate.durationHours,
+    });
+    this.queue.enqueue({
+      eventId: this.createEventId(),
+      simulationTime: event.simulationTime + estimate.durationHours,
+      eventType: 'REPOSITION_ARRIVED',
+      entityId: vessel.vesselId,
+      locationNodeId: cargo.originNodeId,
+      metadata: { ...event.metadata, fuelBurnTonnes, distanceKm: estimate.distanceKm },
+    });
+  }
+
+  private handleRepositionArrived(event: SimulationEvent): void {
+    const vessel = this.context.getVessel(event.entityId);
+    StateMachine.transitionVessel(vessel.status, 'IDLE');
+    this.context.updateVessel(vessel.vesselId, {
+      status: 'IDLE',
+      currentNodeId: event.locationNodeId,
+      currentRoute: undefined,
+      currentVoyageStartedAt: undefined,
+      expectedArrivalAt: undefined,
+    });
+    const cargoIds = Array.isArray(event.metadata.cargoIds)
+      ? event.metadata.cargoIds.filter((cargoId): cargoId is string => typeof cargoId === 'string' && this.context.cargoes.get(cargoId)?.status === 'CREATED')
+      : [];
+    if (cargoIds.length === 0) {
+      for (const cargoId of Array.isArray(event.metadata.cargoIds) ? event.metadata.cargoIds : []) {
+        if (typeof cargoId === 'string') this.reservedCargoIds.delete(cargoId);
+      }
+      this.queue.enqueue({
+        eventId: this.createEventId(),
+        simulationTime: event.simulationTime,
+        eventType: 'SHIP_AVAILABLE',
+        entityId: vessel.vesselId,
+        locationNodeId: event.locationNodeId,
+        metadata: {},
+      });
+      return;
+    }
+    this.queue.enqueue({
+      eventId: this.createEventId(),
+      simulationTime: event.simulationTime,
+      eventType: 'SHIP_ASSIGNED',
+      entityId: vessel.vesselId,
+      locationNodeId: event.locationNodeId,
+      metadata: { cargoIds },
     });
   }
 }

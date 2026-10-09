@@ -916,3 +916,33 @@ Infrastructure lives beneath it.
 Contracts (schemas, interfaces, event shapes) must be defined independently of their implementation language.
 
 This gives a clean migration path to Python without designing Rycon twice.
+
+---
+
+## 31. Post-Iteration Maritime and Demand/Supply Extension
+
+This section records the user-authorized system expansion beyond Iteration 1. It does not change the Iteration 1 acceptance criteria above.
+
+### Trade regions and lane model
+
+* The server classifies canonical ports into broad Rycon planning regions from their WPI country field. Unknown country labels stay explicitly unclassified; no country membership is inferred from a fabricated polygon.
+* The continuous scenario represents 14 reciprocal, human-authored service lanes across North America, South America, Europe, Africa, the Middle East, South Asia, East and Southeast Asia, and Oceania.
+* The synthetic fleet starts across the modeled lane hubs. If a pending shipment has no vessel at its origin, the engine may route an idle vessel empty to that port before loading.
+* Every cycle advances the simulation clock and issues the same lane structure with a deterministic volume sensitivity adjustment within ±10%. The model units are not tonnage, trade value, bookings, or forecasts.
+* Default voyages use seeded weather speed sensitivity, daytime congestion sensitivity, and port-handling delay. These repeatable assumptions are not live condition reports or calibrated forecasts. The engine records on-time and late deliveries against each demand deadline.
+* A continuous cycle closes unassigned movements as failed with an explicit reason; they do not silently accumulate into later cycles.
+* Every active scenario and newly added DS demand receives a server-built route network. Route edges are checked against the configured Natural Earth coastline dataset before the engine uses them. This is a coarse land-crossing screen, not a navigation guarantee.
+
+### DS planning workflow
+
+The DS workspace can create, edit, and withdraw pending demand, register fleet supply, label port endpoints with their Rycon region, save snapshots, and review open model volume by origin region. Adding demand or fleet capacity during an initialized run adds the required route path to the live network before the engine receives that record.
+
+DS remains an independent contract boundary. It does not import the engine or choose routes. The server adapts validated DS records, applies route/network services, and reports execution state back to DS.
+
+### Data limits and next integrations
+
+The World Port Index supplies port identities and locations. It does not provide trade volumes or a global port-to-port origin-destination matrix. Lane selection, cargo categories, and volume weights remain explicit assumptions until an appropriate source is imported and mapped.
+
+Candidate official inputs include UNCTAD's [port liner shipping connectivity index](https://unctadstat.unctad.org/datacentre/reportInfo/US.PLSCI), [bilateral liner shipping connectivity index](https://unctadstat.unctad.org/datacentre/reportInfo/US.LSBCI), and [container port throughput series](https://unctadstat.unctad.org/datacentre/reportInfo/US.ContPortThroughput). Connectivity and throughput indicators can inform network access and port scale, but they are not themselves a complete cargo trade matrix. Any imported series must carry its own version, unit, time period, and source metadata.
+
+Still required for a calibrated global economic simulator: sourced bilateral cargo flows, consistent commodity classification, time-period definitions, fleet and service schedules, fuel and speed observations, and port productivity/capacity data. Live weather routing, route closures, berth optimization, and forecast or optimization modules remain later extensions; seeded condition settings are sensitivity inputs only.

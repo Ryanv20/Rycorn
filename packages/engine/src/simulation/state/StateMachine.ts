@@ -5,7 +5,8 @@ import { SimulationError } from '../../errors/SimulationError';
 export class StateMachine {
   static transitionVessel(current: VesselStatus, target: VesselStatus): void {
     const valid: Record<VesselStatus, VesselStatus[]> = {
-      IDLE: ['ASSIGNED'],
+      IDLE: ['ASSIGNED', 'REPOSITIONING'],
+      REPOSITIONING: ['IDLE'],
       ASSIGNED: ['LOADING'],
       LOADING: ['SAILING'],
       SAILING: ['ARRIVED'],

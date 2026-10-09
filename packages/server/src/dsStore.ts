@@ -1,18 +1,13 @@
 import { FixedScenarioGenerator, InMemoryDemandSupplyStore } from '@rycon/ds-system';
-import { getCanonicalPorts } from './data/portCatalog.js';
 import { setSelectedScenarioPlan } from './maritime/activeScenario.js';
 
-const initialScenario = new FixedScenarioGenerator().generate({ fleetCount: 100, scenarioId: 'NEXT-STOP-09' });
+const initialScenario = new FixedScenarioGenerator().generate({ fleetCount: 100, scenarioId: 'NEXT-STOP-10' });
 setSelectedScenarioPlan(initialScenario);
-const ports = getCanonicalPorts();
-const scenarioOrigins = initialScenario.cargoDemands.map(demand => demand.origin.slice('node-'.length));
-const initialVessels = Array.from({ length: 30 }, (_, index) => scenarioOrigins[index % scenarioOrigins.length]);
-
-for (let index = 0; initialVessels.length < initialScenario.fleetCount; index += 1) {
-  const portIndex = Math.floor(index * ports.length / (initialScenario.fleetCount - initialScenario.cargoDemands.length));
-  const portId = ports[Math.min(portIndex, ports.length - 1)].portId;
-  if (!initialVessels.includes(portId)) initialVessels.push(portId);
-}
+const scenarioOrigins = [...new Set(initialScenario.cargoDemands.map(demand => demand.origin.slice('node-'.length)))];
+const initialVessels = Array.from(
+  { length: initialScenario.fleetCount },
+  (_, index) => scenarioOrigins[index % scenarioOrigins.length],
+);
 
 const fleet = initialVessels.slice(0, initialScenario.fleetCount).map((portId, index) => {
   const vesselType = (['CONTAINER', 'BULK_CARRIER', 'TANKER', 'GENERAL_CARGO', 'REEFER'] as const)[index % 5];

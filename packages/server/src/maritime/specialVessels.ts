@@ -42,6 +42,7 @@ function buildPatrols() {
       ...definition,
       vesselClass: 'SPECIAL',
       status: 'ON PATROL',
+      previewSpeedKnots: 12,
       originName: origin.name,
       destinationName: destination.name,
       coordinates: route.geometry.coordinates,

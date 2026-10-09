@@ -25,6 +25,7 @@ function EventIcon({ eventType }: { eventType: string }) {
 export default function EventLog({ events, compact = false }: { events: any[]; compact?: boolean }) {
   const [category, setCategory] = useState<Category>('Main');
   const visibleEvents = events.filter(event => matchesCategory(event, category));
+  const renderedEvents = compact ? visibleEvents.slice(-12) : visibleEvents;
 
   return (
     <section className={`event-log ${compact ? 'is-compact' : ''}`}>
@@ -33,7 +34,7 @@ export default function EventLog({ events, compact = false }: { events: any[]; c
         {categories.map(item => <button key={item} role="tab" aria-selected={item === category} className={item === category ? 'is-active' : ''} onClick={() => setCategory(item)}>{item}</button>)}
       </div>
       <ol className="event-list">
-        {visibleEvents.map((event, index) => <li key={`${event.eventId ?? event.entityId}-${index}`}>
+        {renderedEvents.map((event, index) => <li key={`${event.eventId ?? event.entityId}-${index}`}>
           <span className={`event-icon event-${event.eventType.toLowerCase()}`}><EventIcon eventType={event.eventType} /></span>
           <div className="event-copy"><strong>{event.eventType.replaceAll('_', ' ')}</strong><small>{event.entityId} · {event.locationNodeId}</small></div>
           <time>T+{Number(event.simulationTime).toFixed(2)}h</time>

@@ -27,6 +27,9 @@ interface Shipment {
   arrivedSimulationHours?: number;
   deliveredSimulationHours?: number;
   transitHours?: number;
+  deadlineSimulationHours?: number;
+  deadlineMet?: boolean;
+  latenessHours?: number;
   milestones: ReportMilestone[];
 }
 
@@ -54,7 +57,7 @@ function downloadFile(name: string, content: string, type: string): void {
 }
 
 function toCsv(report: OperationalReportData): string {
-  const columns = ['requestId', 'origin', 'destination', 'cargoType', 'quantity', 'status', 'vesselId', 'distanceKm', 'route', 'departedSimulationHours', 'arrivedSimulationHours', 'deliveredSimulationHours', 'transitHours'];
+  const columns = ['requestId', 'origin', 'destination', 'cargoType', 'quantity', 'status', 'deadlineSimulationHours', 'deadlineMet', 'latenessHours', 'vesselId', 'distanceKm', 'route', 'departedSimulationHours', 'arrivedSimulationHours', 'deliveredSimulationHours', 'transitHours'];
   const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
   const rows = report.shipments.map(shipment => [
     shipment.requestId,
@@ -63,6 +66,9 @@ function toCsv(report: OperationalReportData): string {
     shipment.cargoType,
     shipment.quantity,
     shipment.status,
+    shipment.deadlineSimulationHours,
+    shipment.deadlineMet,
+    shipment.latenessHours,
     shipment.vesselId,
     shipment.distanceKm,
     shipment.routeNodeIds?.join(' > '),
@@ -125,23 +131,31 @@ export default function OperationalReport({ onClose }: { onClose: () => void }) 
         </header>
         {error && <p className="report-error">{error}</p>}
         {report && <>
-          <section className="report-metrics" aria-label="Simulation summary">
-            <div><span>Modeled elapsed time</span><strong>T+{report.simulationTimeHours.toFixed(2)} h</strong></div>
-            <div><span>Shipments</span><strong>{report.shipments.length}</strong></div>
-            <div><span>Events</span><strong>{report.systemStatus.totalEventsProcessed}</strong></div>
-            <div><span>System</span><strong>{report.systemStatus.engineRunning ? 'RUNNING' : report.systemStatus.engineInitialized ? 'PAUSED' : 'NOT INITIALIZED'}</strong></div>
-          </section>
+          {(() => {
+            const completed = report.shipments.filter(shipment => shipment.deadlineMet !== undefined);
+            const onTime = completed.filter(shipment => shipment.deadlineMet === true).length;
+            const late = completed.filter(shipment => shipment.deadlineMet === false).length;
+            return <section className="report-metrics" aria-label="Simulation summary">
+              <div><span>Modeled elapsed time</span><strong>T+{report.simulationTimeHours.toFixed(2)} h</strong></div>
+              <div><span>Shipments in view</span><strong>{report.shipments.length}</strong></div>
+              <div><span>On-time deliveries</span><strong>{onTime}</strong></div>
+              <div><span>Late deliveries</span><strong>{late}</strong></div>
+              <div><span>Events</span><strong>{report.systemStatus.totalEventsProcessed}</strong></div>
+              <div><span>System</span><strong>{report.systemStatus.engineRunning ? 'RUNNING' : report.systemStatus.engineInitialized ? 'PAUSED' : 'NOT INITIALIZED'}</strong></div>
+            </section>;
+          })()}
           <section className="report-section">
             <h2>Shipments</h2>
             <div className="report-table-wrap">
               <table>
-                <thead><tr><th>Request</th><th>Route</th><th>Cargo</th><th>Vessel</th><th>Status</th><th>Distance</th><th>Transit</th></tr></thead>
+                <thead><tr><th>Request</th><th>Route</th><th>Cargo</th><th>Vessel</th><th>Status</th><th>Deadline</th><th>Distance</th><th>Transit</th></tr></thead>
                 <tbody>{report.shipments.map(shipment => <tr key={shipment.requestId}>
                   <td>{shipment.requestId}</td>
                   <td>{shipment.origin} → {shipment.destination}<small>{shipment.routeNodeIds?.join(' → ')}</small></td>
                   <td>{shipment.quantity} {shipment.cargoType}</td>
                   <td>{shipment.vesselId ?? 'Unassigned'}</td>
                   <td>{shipment.status}</td>
+                  <td>{shipment.deadlineMet === undefined ? '—' : shipment.deadlineMet ? 'On time' : `Late by ${shipment.latenessHours?.toFixed(1) ?? '—'} h`}</td>
                   <td>{shipment.distanceKm === undefined ? '—' : `${shipment.distanceKm.toFixed(1)} km`}</td>
                   <td>{shipment.transitHours === undefined ? '—' : `${shipment.transitHours.toFixed(2)} h`}</td>
                 </tr>)}</tbody>

@@ -13,22 +13,34 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
     const body = (request.body as any) ?? {};
     dsStore.resetUnfinishedDemands();
     const selectedPlan = getSelectedScenarioPlan();
+    if (selectedPlan) dsStore.replaceScenarioDemands(selectedPlan.cargoDemands);
     const demands = body.cargoes
       ? []
       : dsStore.getCargoDemands().filter(demand => demand.status === 'PENDING');
-    const scenario = await buildScenarioNetwork(demands);
+    const vessels = body.vessels ?? dsStore.getVesselSupply().map(vessel => ({
+      id: vessel.id,
+      capability: VesselCapability[vessel.capability],
+      startNodeId: vessel.startNodeId,
+      vesselType: vessel.vesselType,
+      deadweightTonnes: vessel.deadweightTonnes,
+      fuelCapacityTonnes: vessel.fuelCapacityTonnes,
+      fuelRemainingTonnes: vessel.fuelRemainingTonnes,
+      fuelBurnTonnesPerHour: vessel.fuelBurnTonnesPerHour,
+    }));
+    const routeDemands = body.cargoes?.map((cargo: any) => ({
+      requestId: cargo.id,
+      origin: cargo.origin,
+      destination: cargo.destination,
+      quantity: cargo.quantity ?? 1,
+      earliestDeparture: cargo.earliestDeparture ?? 0,
+      deadline: cargo.deadline ?? 1,
+      cargoType: cargo.cargoType ?? 'GENERAL',
+      status: 'PENDING' as const,
+    })) ?? demands;
+    const scenario = await buildScenarioNetwork(routeDemands, vessels.map((vessel: any) => vessel.startNodeId));
     setActiveScenario(scenario);
     simulationStream.initialize({
-      vessels: body.vessels ?? dsStore.getVesselSupply().map(vessel => ({
-        id: vessel.id,
-        capability: VesselCapability[vessel.capability],
-        startNodeId: vessel.startNodeId,
-        vesselType: vessel.vesselType,
-        deadweightTonnes: vessel.deadweightTonnes,
-        fuelCapacityTonnes: vessel.fuelCapacityTonnes,
-        fuelRemainingTonnes: vessel.fuelRemainingTonnes,
-        fuelBurnTonnesPerHour: vessel.fuelBurnTonnesPerHour,
-      })),
+      vessels,
       cargoes: body.cargoes ?? demands
         .map(demand => ({
         id: demand.requestId,
@@ -46,9 +58,17 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
         bunkerPortNodeIds: ['19WPI-50000', '19WPI-16080', '19WPI-18150', '19WPI-53650', '19WPI-46850'].map(id => `node-${id}`),
         bunkeringDurationHours: 2,
         ...body.config,
+        environment: {
+          enabled: true,
+          seed: 'RYCORN-GLOBAL-TRADE-1',
+          maxWeatherImpact: 0.12,
+          congestionEnabled: true,
+          maxPortDelayHours: 1.5,
+          ...(body.config?.environment ?? {}),
+        },
       },
     });
-    simulationStream.setContinuousDemands(selectedPlan?.continuous ? demands : null);
+    simulationStream.setContinuousDemands(selectedPlan?.continuous && !body.cargoes ? selectedPlan.cargoDemands : null);
     return { success: true, status: simulationStream.getSystemStatus() };
   });
 
@@ -98,5 +118,6 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
 
   fastify.get('/simulation/events', async () => simulationStream.getEvents());
   fastify.get('/simulation/time-observations', async () => simulationStream.getTimeObservations());
+  fastify.get('/simulation/trade-cycles', async () => simulationStream.getTradeCycleSummaries());
   fastify.get('/simulation/report', async () => createOperationalReport());
 }

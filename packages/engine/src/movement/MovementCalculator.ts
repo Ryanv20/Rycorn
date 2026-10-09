@@ -25,6 +25,9 @@ export class MovementCalculator {
     ];
     const profiles = speeds || defaultSpeeds;
     for (const sp of profiles) {
+      if (!Number.isFinite(sp.nominalSpeedKnots) || sp.nominalSpeedKnots <= 0) {
+        throw new Error(`Speed profile for capability ${sp.capability} must be a positive number of knots`);
+      }
       this.speedMap.set(sp.capability, sp.nominalSpeedKnots);
     }
   }
@@ -40,6 +43,12 @@ export class MovementCalculator {
     const multiplier = this.modifier
       ? this.modifier.getSpeedMultiplier(route.path[0], route.path[route.path.length - 1], simulationTime)
       : 1.0;
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new Error(`Movement condition returned an invalid speed multiplier: ${multiplier}`);
+    }
+    if (!Number.isFinite(route.totalDistanceKm) || route.totalDistanceKm < 0) {
+      throw new Error(`Route has an invalid distance: ${route.totalDistanceKm} km`);
+    }
       
     const durationHours = (route.totalDistanceKm / speedKmh) * (1 / multiplier);
 

@@ -5,6 +5,7 @@ export const demandStatusSchema = z.enum([
   'ASSIGNED',
   'IN_TRANSIT',
   'DELIVERED',
+  'DELIVERED_LATE',
   'CANCELLED',
   'FAILED',
 ]);
@@ -17,6 +18,11 @@ export const cargoDemandSchema = z.object({
   earliestDeparture: z.number().nonnegative(),
   deadline: z.number().positive(),
   cargoType: z.string().min(1).default('GENERAL'),
+  originRegionId: z.string().min(1).optional(),
+  destinationRegionId: z.string().min(1).optional(),
+  tradeLaneId: z.string().min(1).optional(),
+  cycleNumber: z.number().int().positive().optional(),
+  failureReason: z.string().min(1).optional(),
   status: demandStatusSchema.default('PENDING'),
 });
 
