@@ -14,6 +14,8 @@ const bunkerIcon = new DivIcon({ className: 'asset-map-icon bunker-map-icon', ht
 
 interface MapProps {
   vessels: any[];
+  cargoes: any[];
+  ports: any[];
   plannedRoutes: Array<{ requestId: string; originPortId?: string; destinationPortId?: string; coordinates: [number, number][]; distanceKm: number; originName?: string; destinationName?: string; originRegionId?: string; destinationRegionId?: string }>;
   specialVessels: SpecialVesselRecord[];
   showPorts: boolean;
@@ -59,9 +61,8 @@ function routeGeometryKey(coordinates: [number, number][]): string {
   return forward < reverse ? forward : reverse;
 }
 
-export default function Map({ vessels, plannedRoutes, specialVessels, showPorts, showRoutes, showSpecial, showShips, showBunkers, showTraffic, showNodeLabels, routesOnly, projection, cameraFollow, selectedVesselId, followPoint, onSelectVessel, onFollowNode, simulationTimeHours, simulationRunning, clockProfileId }: MapProps) {
+export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVessels, showPorts, showRoutes, showSpecial, showShips, showBunkers, showTraffic, showNodeLabels, routesOnly, projection, cameraFollow, selectedVesselId, followPoint, onSelectVessel, onFollowNode, simulationTimeHours, simulationRunning, clockProfileId }: MapProps) {
   const [nodes, setNodes] = useState<any[]>([]);
-  const [ports, setPorts] = useState<any[]>([]);
   const [bunkerSpots, setBunkerSpots] = useState<any[]>([]);
   const nodeById = useMemo(() => new globalThis.Map(nodes.map(node => [node.id, node])), [nodes]);
   const tradeLaneRoutes = useMemo(() => {
@@ -75,11 +76,15 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
   }, [plannedRoutes]);
   const fleetPortKey = [...new Set(vessels.map(vessel => vessel.currentNodeId)
     .filter((nodeId: unknown): nodeId is string => typeof nodeId === 'string' && nodeId.startsWith('node-19WPI-')))].sort().join('|');
+  const demandPortKey = [...new Set(cargoes.flatMap(cargo => [cargo.originNodeId, cargo.destinationNodeId]
+    .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.startsWith('node-19WPI-'))
+    .map(nodeId => nodeId.slice('node-'.length))))].sort().join('|');
   const visiblePortIds = useMemo(() => new Set([
     ...tradeLaneRoutes.flatMap(route => [route.originPortId, route.destinationPortId].filter((portId): portId is string => Boolean(portId))),
+    ...demandPortKey.split('|').filter(Boolean),
     ...fleetPortKey.split('|').filter(Boolean).map(nodeId => nodeId.slice('node-'.length)),
-  ]), [tradeLaneRoutes, fleetPortKey]);
-  const tradePorts = useMemo(() => ports.filter(port => visiblePortIds.has(port.portId)), [ports, visiblePortIds]);
+  ]), [tradeLaneRoutes, demandPortKey, fleetPortKey]);
+  const visiblePorts = useMemo(() => ports.filter(port => visiblePortIds.has(port.portId)), [ports, visiblePortIds]);
 
   const getCoordinates = (node: any): [number, number] | null => {
     if (!node) return null;
@@ -112,15 +117,12 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
   useEffect(() => {
     Promise.all([
       fetch(`${API}/network/nodes`).then(response => response.json()),
-      fetch(`${API}/network/ports`).then(response => response.json()),
       fetch(`${API}/network/bunker-spots`).then(response => response.json()),
-    ]).then(([nextNodes, nextPorts, nextBunkerSpots]) => {
+    ]).then(([nextNodes, nextBunkerSpots]) => {
       setNodes(nextNodes);
-      setPorts(nextPorts);
       setBunkerSpots(nextBunkerSpots);
     }).catch(() => {
       setNodes([]);
-      setPorts([]);
       setBunkerSpots([]);
     });
   }, [plannedRoutes]);
@@ -130,6 +132,7 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
       <GlobeView
         routes={showRoutes ? tradeLaneRoutes : []}
         vessels={vessels}
+        ports={visiblePorts}
         showRoutes={showRoutes}
         showPorts={showPorts}
         showShips={showShips}
@@ -158,7 +161,7 @@ export default function Map({ vessels, plannedRoutes, specialVessels, showPorts,
           <span><img src="/visual_component/icons/route.svg" alt="" /> Route</span><span><img src="/visual_component/icons/port.svg" alt="" /> Port</span><span><img src="/visual_component/icons/bunker.svg" alt="" /> Bunker</span>
         </>}
       </div>
-      {showPorts && (routesOnly ? tradePorts : ports).map(port => (
+      {showPorts && visiblePorts.map(port => (
         <PortMarker key={port.portId} port={{ ...port, id: `node-${port.portId}`, position: { latitude: port.latitude, longitude: port.longitude } }} showLabel={showNodeLabels} onFollow={() => onFollowNode([port.latitude, port.longitude])} />
       ))}
       {showBunkers && !routesOnly && bunkerSpots.map(spot => <Marker

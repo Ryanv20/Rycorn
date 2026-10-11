@@ -1,6 +1,8 @@
 # Dependencies and package-manager caches
 node_modules/
 .pnpm-store/
+.tools/aws-cli/
+.tools/bin/
 
 # Build and tooling output
 dist/

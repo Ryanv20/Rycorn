@@ -34,6 +34,7 @@ interface VesselRecord {
 interface GlobeViewProps {
   routes: RouteRecord[];
   vessels: VesselRecord[];
+  ports: PortRecord[];
   showPorts: boolean;
   showRoutes: boolean;
   showShips: boolean;
@@ -244,9 +245,9 @@ function disposeGroup(group: THREE.Group): void {
   });
 }
 
-export default function GlobeView({ routes, vessels, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, clockProfileId }: GlobeViewProps) {
+export default function GlobeView({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, clockProfileId }: GlobeViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const dataRef = useRef({ routes, vessels, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning });
+  const dataRef = useRef({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning });
   const simulationCursor = useRef({
     serverHours: simulationTimeHours,
     visualHours: simulationTimeHours,
@@ -263,7 +264,7 @@ export default function GlobeView({ routes, vessels, showPorts, showRoutes, show
   const [routeCount, setRouteCount] = useState(0);
   const [error, setError] = useState('');
 
-  dataRef.current = { routes, vessels, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning };
+  dataRef.current = { routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning };
 
   useEffect(() => {
     const cursor = simulationCursor.current;
@@ -282,13 +283,10 @@ export default function GlobeView({ routes, vessels, showPorts, showRoutes, show
 
     const load = async () => {
       try {
-        const [portsResponse, nodesResponse] = await Promise.all([
-          fetch(`${API}/network/ports`).catch(() => null),
-          fetch(`${API}/network/nodes`).catch(() => null),
-        ]);
-        const ports = portsResponse?.ok ? await portsResponse.json() as PortRecord[] : [];
+        const nodesResponse = await fetch(`${API}/network/nodes`).catch(() => null);
+        const ports = dataRef.current.ports;
         const nodes = nodesResponse?.ok ? await nodesResponse.json() as NodeRecord[] : [];
-        if (!portsResponse?.ok || !nodesResponse?.ok) setError('Live port or route data is unavailable. Showing the global view without that layer.');
+        if (!nodesResponse?.ok) setError('Live route data is unavailable. Showing the global view without that layer.');
         if (disposed) return;
         setPortCount(ports.length);
 
@@ -460,8 +458,8 @@ export default function GlobeView({ routes, vessels, showPorts, showRoutes, show
     const globeGroup = globeGroupRef.current;
     const portGroup = portsGroupRef.current;
     if (!globeGroup || !portGroup) return;
-    if (showPorts && portGroup.children.length === 0) addPorts(portGroup, portsRef.current);
-    if (!showPorts && portGroup.children.length > 0) {
+    portsRef.current = ports;
+    if (portGroup.children.length > 0) {
       for (const child of [...portGroup.children]) {
         portGroup.remove(child);
         if (child instanceof THREE.Points) {
@@ -472,7 +470,8 @@ export default function GlobeView({ routes, vessels, showPorts, showRoutes, show
         }
       }
     }
-  }, [showPorts]);
+    if (showPorts) addPorts(portGroup, ports);
+  }, [showPorts, ports]);
 
   useEffect(() => {
     const globeGroup = globeGroupRef.current;
