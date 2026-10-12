@@ -39,6 +39,8 @@ The engine's `simulationTime` is elapsed modeled hours from `T+0`. Distance `d` 
 
 Open **REPORT** in the simulation toolbar for a live shipment report. It refreshes automatically and includes demand/supply, region and lane metadata, vessel and cargo states, route/distance, recent trade-cycle summaries, event history, time observations, and errors. Export the full record as JSON, shipment rows as CSV, or use **Print / PDF**.
 
+To archive the current operational report to S3, set `RYCORN_S3_BUCKET` and configure the AWS SDK default credential and region providers for the server environment. Then call `POST /simulation/report/archive`. The server writes a JSON artifact under `simulation-reports/YYYY-MM-DD/`; its IAM role needs `s3:PutObject` access to that prefix. No S3 writes happen automatically.
+
 ## Global trade loop
 
 **Next Stop 10** runs a continuous network of reciprocal illustrative lanes across North America, South America, Europe, Africa, the Middle East, South Asia, East and Southeast Asia, and Oceania. Vessels may reposition empty to meet demand at another port. The DS workspace shows port coverage by model region and reports completed cycle volume.

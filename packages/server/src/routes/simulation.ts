@@ -6,6 +6,7 @@ import { createOperationalReport } from '../reporting/OperationalReport.js';
 import { buildScenarioNetwork } from '../maritime/ScenarioNetwork.js';
 import { getSelectedScenarioPlan, setActiveScenario } from '../maritime/activeScenario.js';
 import { CLOCK_PROFILES, type ClockProfileId } from '../websocket/SimulationStream.js';
+import { s3ArtifactStore } from '../storage/S3ArtifactStore.js';
 
 export default async function simulationRoutes(fastify: FastifyInstance) {
   // Initialize — network is always built server-side from demoNetwork.ts
@@ -120,4 +121,12 @@ export default async function simulationRoutes(fastify: FastifyInstance) {
   fastify.get('/simulation/time-observations', async () => simulationStream.getTimeObservations());
   fastify.get('/simulation/trade-cycles', async () => simulationStream.getTradeCycleSummaries());
   fastify.get('/simulation/report', async () => createOperationalReport());
+
+  fastify.post('/simulation/report/archive', async (_request, reply) => {
+    if (!process.env.RYCORN_S3_BUCKET?.trim()) {
+      return reply.code(503).send({ error: 'S3 report storage is not configured' });
+    }
+    const artifact = await s3ArtifactStore.putJson('simulation-reports', createOperationalReport());
+    return { success: true, ...artifact };
+  });
 }

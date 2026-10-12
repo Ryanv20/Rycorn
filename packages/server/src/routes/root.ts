@@ -9,6 +9,8 @@ const help = {
     networkEdges: 'GET /network/edges',
     simulationStatus: 'GET /simulation/status',
     simulationEvents: 'GET /simulation/events',
+    simulationReport: 'GET /simulation/report',
+    archiveSimulationReport: 'POST /simulation/report/archive',
   },
   simulationActions: {
     initialize: 'POST /simulation/initialize',
