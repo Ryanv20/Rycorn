@@ -49,19 +49,25 @@ find_open_port() {
 
 api_port="$(find_open_port "${RYCORN_API_PORT:-3000}")"
 client_port="$(find_open_port "${RYCORN_CLIENT_PORT:-5173}")"
+port_console_port="$(find_open_port "${RYCORN_PORT_CONSOLE_PORT:-5176}")"
 export RYCORN_API_PORT="$api_port"
 export RYCORN_CLIENT_PORT="$client_port"
+export RYCORN_PORT_CONSOLE_PORT="$port_console_port"
 export VITE_RYCORN_API_PORT="$api_port"
+export NEXT_PUBLIC_RYCORN_API_ORIGIN="http://localhost:${api_port}"
 
-echo "Starting Rycorn API, WebSocket server, and client..."
+echo "Starting Rycorn API, WebSocket server, network client, and Los Angeles port console..."
 echo "API: http://localhost:${api_port}"
-echo "Open http://localhost:${client_port} and initialize the simulation from the controls."
+echo "Network client: http://localhost:${client_port}"
+echo "Los Angeles port console: http://localhost:${port_console_port}"
+echo "Initialize and run the simulation from either console."
 lan_addresses="$(hostname -I 2>/dev/null || true)"
 if [[ -n "$lan_addresses" ]]; then
   for address in $lan_addresses; do
-    echo "Phone on the same Wi-Fi: http://${address}:${client_port}"
+    echo "Phone on the same Wi-Fi (network client): http://${address}:${client_port}"
+    echo "Phone on the same Wi-Fi (LA port console): http://${address}:${port_console_port}"
   done
 else
-  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port}."
+  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port} or ${port_console_port}."
 fi
-exec pnpm -r --parallel --filter @rycon/server --filter @rycon/client dev
+exec pnpm -r --parallel --filter @rycon/server --filter @rycon/client --filter @rycorn/new-file dev

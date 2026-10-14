@@ -4,3 +4,5 @@ packages:
   - 'packages/*'
   - 'DS_System'
   - 'LearnersD'
+  - 'Rycorn-port'
+  - 'new_file'

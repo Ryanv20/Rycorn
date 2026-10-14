@@ -8,6 +8,8 @@
     "test:server": "pnpm --filter @rycon/server test",
     "dev:server": "pnpm --filter @rycon/server dev",
     "dev:client": "pnpm --filter @rycon/client dev",
+    "dev:port": "pnpm --filter @rycorn/port dev",
+    "dev:new-file": "pnpm --filter @rycorn/new-file dev",
     "rycorn": "bash ./Rycorn",
     "test:ds": "pnpm --filter @rycon/ds-system test",
     "build:client": "pnpm --filter @rycon/client build",
