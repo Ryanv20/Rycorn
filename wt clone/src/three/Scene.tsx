@@ -1,0 +1,304 @@
+import { useEffect, useMemo, useRef } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { CameraControls, Html, Line } from '@react-three/drei'
+import * as THREE from 'three'
+import { sim, stepSim, initSim, truckById, forkliftById, slotById, whById } from '../sim/sim'
+import { FRONT_Z } from '../sim/world'
+import { useUI } from '../store'
+import type { Selection } from '../store'
+import { TruckModel, ForkliftModel } from './Vehicles'
+import { WarehouseModel } from './Warehouse'
+import { World } from './Environment'
+
+initSim()
+
+const VIEW_OFFSET = new THREE.Vector3(66, 74, 80)
+const whFocus = (id: string) => {
+  const w = whById(id)
+  return new THREE.Vector3(w.cx, 0, FRONT_Z + 10 + w.zOffset)
+}
+
+function SimDriver() {
+  const bump = useUI((s) => s.bump)
+  const acc = useRef(0)
+  useFrame((_, dt) => {
+    stepSim(dt)
+    acc.current += dt
+    if (acc.current > 0.2) {
+      acc.current = 0
+      bump()
+    }
+  })
+  return null
+}
+
+function selectionPos(sel: Selection): THREE.Vector3 | null {
+  if (!sel) return null
+  if (sel.type === 'truck') {
+    const t = truckById(sel.id)
+    return t ? new THREE.Vector3(t.pos.x, 0, t.pos.z) : null
+  }
+  if (sel.type === 'forklift') {
+    const f = forkliftById(sel.id)
+    return f ? new THREE.Vector3(f.pos.x, 0, f.pos.z) : null
+  }
+  const s = slotById(sel.id)
+  return s ? new THREE.Vector3(s.x, 0, s.z) : null
+}
+
+function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | null> }) {
+  const ref = useRef<CameraControls>(null)
+  const camCmd = useUI((s) => s.camCmd)
+  const activeWh = useUI((s) => s.activeWh)
+  const tmp = useMemo(() => new THREE.Vector3(), [])
+
+  useEffect(() => {
+    const c = ref.current
+    if (!c) return
+    c.setLookAt(100, 800, 220, 0, 0, -120, false)
+    const stop = () => useUI.getState().setFollow(false)
+    c.addEventListener('controlstart', stop)
+    return () => c.removeEventListener('controlstart', stop)
+  }, [])
+
+  useEffect(() => {
+    const c = ref.current
+    if (!c || !camCmd) return
+    const { cmd } = camCmd
+    if (cmd.kind === 'warehouse' || cmd.kind === 'home') {
+      const id = cmd.kind === 'warehouse' ? cmd.id : activeWh
+      if (id === 'all') {
+        c.setLookAt(100, 800, 220, 0, 0, -120, true)
+      } else {
+        const t = whFocus(id)
+        const p = t.clone().add(VIEW_OFFSET)
+        c.setLookAt(p.x, p.y, p.z, t.x, t.y, t.z, true)
+      }
+    } else if (cmd.kind === 'overview') {
+      c.setLookAt(100, 800, 220, 0, 0, -120, true)
+    } else if (cmd.kind === 'zoom') {
+      c.dolly(cmd.dir * c.distance * 0.25, true)
+    } else if (cmd.kind === 'rotate') {
+      c.rotate((cmd.dir * Math.PI) / 6, 0, true)
+    } else if (cmd.kind === 'focus') {
+      c.moveTo(cmd.x, 0, cmd.z, true)
+    }
+    // activeWh intentionally read at command time only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camCmd])
+
+  useFrame(() => {
+    const c = ref.current
+    if (!c) return
+    const { follow, selected } = useUI.getState()
+    if (follow) {
+      const p = selectionPos(selected)
+      if (p) c.moveTo(p.x, 0, p.z, true)
+    }
+    const l = light.current
+    if (l) {
+      c.getTarget(tmp)
+      l.position.set(tmp.x - 55, 95, tmp.z - 15)
+      l.target.position.copy(tmp)
+      l.target.updateMatrixWorld()
+      const d = Math.min(160, Math.max(50, c.distance * 0.75))
+      const cam = l.shadow.camera
+      if (cam.right !== d) {
+        cam.left = -d
+        cam.right = d
+        cam.top = d
+        cam.bottom = -d
+        cam.updateProjectionMatrix()
+      }
+    }
+  })
+
+  return (
+    <CameraControls
+      ref={ref}
+      makeDefault
+      minDistance={18}
+      maxDistance={1100}
+      minPolarAngle={0.25}
+      maxPolarAngle={1.15}
+      dollyToCursor
+      smoothTime={0.45}
+      draggingSmoothTime={0.12}
+      mouseButtons={{ left: 4, middle: 16, right: 1, wheel: 16 }}
+      touches={{ one: 256, two: 4096, three: 64 }}
+    />
+  )
+}
+
+const BOX = {
+  truck: { size: [3.2, 4.6, 12], y: 2.3, z: 0 },
+  forklift: { size: [2.0, 3.0, 4.0], y: 1.5, z: 0.3 },
+  slot: { size: [1.8, 2.0, 1.8], y: 1.0, z: 0 },
+} as const
+
+function Brackets({ size }: { size: readonly number[] }) {
+  const pts = useMemo(() => {
+    const [w, h, d] = size.map((v) => v / 2)
+    const k = Math.min(w, h, d) * 0.55
+    const out: [number, number, number][] = []
+    for (const sx of [-1, 1])
+      for (const sy of [-1, 1])
+        for (const sz of [-1, 1]) {
+          const c: [number, number, number] = [sx * w, sy * h, sz * d]
+          out.push(c, [c[0] - sx * k, c[1], c[2]])
+          out.push(c, [c[0], c[1] - sy * k, c[2]])
+          out.push(c, [c[0], c[1], c[2] - sz * k])
+        }
+    return out
+  }, [size])
+  return <Line points={pts} segments color="#2f6bed" lineWidth={2.2} />
+}
+
+function SelectionMarker() {
+  const sel = useUI((s) => s.selected)
+  useUI((s) => s.tick)
+  const group = useRef<THREE.Group>(null)
+  const ring = useRef<THREE.Mesh>(null)
+  useFrame(({ clock }) => {
+    const g = group.current
+    if (!g || !sel) return
+    if (sel.type === 'truck') {
+      const t = truckById(sel.id)
+      if (t) g.position.set(t.pos.x, 0, t.pos.z), (g.rotation.y = t.heading)
+    } else if (sel.type === 'forklift') {
+      const f = forkliftById(sel.id)
+      if (f) g.position.set(f.pos.x, 0, f.pos.z), (g.rotation.y = f.heading)
+    } else {
+      const s = slotById(sel.id)
+      if (s) g.position.set(s.x, 0, s.z), (g.rotation.y = 0)
+    }
+    if (ring.current) {
+      const k = 1 + ((clock.elapsedTime * 0.8) % 1) * 0.35
+      ring.current.scale.set(k, k, k)
+      ;(ring.current.material as THREE.MeshBasicMaterial).opacity = 0.45 * (1 - ((clock.elapsedTime * 0.8) % 1))
+    }
+  })
+  if (!sel) return null
+  const exists = sel.type === 'truck' ? truckById(sel.id) : sel.type === 'forklift' ? forkliftById(sel.id) : slotById(sel.id)
+  if (!exists) return null
+  const b = BOX[sel.type]
+  const r = Math.max(b.size[0], b.size[2]) * 0.62
+  return (
+    <group ref={group}>
+      <group position={[0, b.y, b.z]}>
+        <Brackets size={b.size} />
+        <mesh>
+          <boxGeometry args={b.size as unknown as [number, number, number]} />
+          <meshBasicMaterial color="#2f6bed" transparent opacity={0.07} depthWrite={false} />
+        </mesh>
+      </group>
+      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, b.z]}>
+        <ringGeometry args={[r * 0.92, r, 48]} />
+        <meshBasicMaterial color="#2f6bed" transparent opacity={0.4} depthWrite={false} />
+      </mesh>
+      <Html position={[0, b.size[1] + 0.9, 0]} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="tag tag-selected">{sel.type === 'slot' ? 'Pallet' : sel.id}</div>
+      </Html>
+    </group>
+  )
+}
+
+function ForkliftTags() {
+  const active = useUI((s) => s.activeWh)
+  const sel = useUI((s) => s.selected)
+  useUI((s) => s.tick)
+  const list = sim.forklifts.filter((f) => f.whId === active && !(sel?.type === 'forklift' && sel.id === f.id))
+  return (
+    <>
+      {list.map((f) => (
+        <ForkTag key={f.id} id={f.id} />
+      ))}
+    </>
+  )
+}
+
+function ForkTag({ id }: { id: string }) {
+  const g = useRef<THREE.Group>(null)
+  const f = forkliftById(id)!
+  useFrame(() => g.current?.position.set(f.pos.x, 3.3, f.pos.z))
+  const short = f.status.replace(/ at Bay \d/, '')
+  return (
+    <group ref={g}>
+      <Html center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="tag">
+          <b>{f.id}</b>
+          <span>{short}</span>
+        </div>
+      </Html>
+    </group>
+  )
+}
+
+function Trucks() {
+  useUI((s) => s.tick)
+  return (
+    <>
+      {sim.trucks.map((t) => (
+        <TruckModel key={t.id} truck={t} />
+      ))}
+    </>
+  )
+}
+
+function Lights() {
+  const light = useRef<THREE.DirectionalLight>(null)
+  return (
+    <>
+      <hemisphereLight args={['#ffffff', '#d9def0', 1.05]} />
+      <ambientLight intensity={0.25} />
+      <directionalLight
+        ref={light}
+        intensity={2.8}
+        color="#fffaf0"
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.05}
+        shadow-camera-near={1}
+        shadow-camera-far={300}
+      />
+      <CameraRig light={light} />
+    </>
+  )
+}
+
+function Background() {
+  const { scene } = useThree()
+  useEffect(() => {
+    scene.background = new THREE.Color('#eceffa')
+    scene.fog = new THREE.Fog('#eceffa', 380, 900)
+  }, [scene])
+  return null
+}
+
+export default function Scene() {
+  const select = useUI((s) => s.select)
+  return (
+    <Canvas
+      shadows
+      dpr={[1, 1.75]}
+      camera={{ fov: 30, near: 1, far: 2000, position: [100, 100, 100] }}
+      onPointerMissed={() => select(null)}
+      gl={{ antialias: true }}
+    >
+      <Background />
+      <SimDriver />
+      <Lights />
+      <World />
+      {sim.warehouses.map((w) => (
+        <WarehouseModel key={w.id} w={w} />
+      ))}
+      <Trucks />
+      {sim.forklifts.map((f) => (
+        <ForkliftModel key={f.id} fl={f} />
+      ))}
+      <SelectionMarker />
+      <ForkliftTags />
+    </Canvas>
+  )
+}

@@ -48,7 +48,7 @@ const overlayOptions: Array<{ key: OverlayKey; label: string }> = [
   { key: 'simulationBadge', label: 'Simulation badge' },
   { key: 'sceneCaption', label: 'Scene caption' },
 ]
-const initialOverlayState: Record<OverlayKey, boolean> = Object.fromEntries(overlayOptions.map(({ key }) => [key, true])) as Record<OverlayKey, boolean>
+const initialOverlayState: Record<OverlayKey, boolean> = Object.fromEntries(overlayOptions.map(({ key }) => [key, false])) as Record<OverlayKey, boolean>
 
 const EMPTY: DashboardData = { port: null, demands: [], supply: [], nodes: [], vessels: [], cargoes: [], events: [], system: null }
 const nf = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })

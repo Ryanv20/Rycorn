@@ -38,6 +38,9 @@ type Selection = { id: string; title: string; status: string; detail: string } |
 type Point = [number, number]
 type WorldPoint = [number, number, number]
 const WORLD_SCALE = 6.32 // 10x the previous ground footprint while preserving 3D proportions.
+const SCENE_MOTION_ENABLED = false
+const PORT_AERIAL_TARGET: WorldPoint = [330, 0, 50]
+const PORT_AERIAL_POSITION: WorldPoint = [550, 4200, 850]
 const isTanker = (vessel: YardVessel) => /tanker|oil|liquid|chemical/i.test(`${vessel.type ?? ''} ${vessel.capability}`)
 
 const palette = ['#3e7582', '#c17857', '#71917c', '#d0a16b', '#62799a', '#a7a178']
@@ -145,6 +148,7 @@ function AnimatedWater() {
   }, [])
   useEffect(() => () => geometry.dispose(), [geometry])
   useFrame(({ clock }) => {
+    if (!SCENE_MOTION_ENABLED) return
     const positions = geometry.attributes.position as THREE.BufferAttribute
     const values = positions.array as Float32Array
     const time = clock.elapsedTime
@@ -188,6 +192,7 @@ function LightingCycle({ simulationTimeHours, simulationRunning, clockProfileId,
   }, [simulationTimeHours])
 
   useFrame(({ clock }, delta) => {
+    if (!SCENE_MOTION_ENABLED) return
     const rate = clockRates[clockProfileId] ?? 1
     const activeHours = simulationRunning
       ? (timeline.current.visual += Math.min(delta, 0.08) * Math.min(rate, 0.3))
@@ -399,6 +404,7 @@ function Crane({ x, z = 1, index, select }: { x: number; z?: number; index: numb
   const spreader = useRef<THREE.Mesh>(null)
   const handleClick = useCallback(() => select({ id: `STS-CRANE-${String(index + 1).padStart(2, '0')}`, title: 'Ship-to-shore crane', status: 'ACTIVE VISUAL MODEL', detail: 'Animated crane asset. Rycon supplies vessel and cargo state; terminal machinery remains a local scene asset for now.' }), [index, select])
   useFrame(({ clock }) => {
+    if (!SCENE_MOTION_ENABLED) return
     if (!trolley.current || !cable.current || !spreader.current) return
     const phase = clock.elapsedTime * 0.3 + index * 0.8
     trolley.current.position.x = Math.sin(phase) * 5.2
@@ -698,6 +704,7 @@ function Ship({ vessel, berth, nodes, portNodeId, portLatitude, simulationTimeHo
     time.rate = clockRates[clockProfileId] ?? 1
   }, [simulationTimeHours, simulationRunning, clockProfileId])
   useFrame(({ clock }, delta) => {
+    if (!SCENE_MOTION_ENABLED) return
     if (!group.current) return
     let position = berthPosition
     let heading = 0
@@ -769,6 +776,7 @@ function Tugboat({ index, select }: { index: number; select: (selection: Selecti
     select({ id: `PORT-TUG-${String(index + 1).padStart(2, '0')}`, title: 'Harbor tugboat', status: 'ACTIVE HARBOR CRAFT', detail: 'One of two harbor tugs patrolling the west or east approach channel.' })
   }, [index, select])
   useFrame(({ clock }) => {
+    if (!SCENE_MOTION_ENABLED) return
     if (!group.current) return
     const progress = (clock.elapsedTime * (0.014 + index * 0.001) + index * 0.23) % 1
     const position = pointAlongRoute(route, progress)
@@ -856,6 +864,7 @@ function Vehicle({ id, index, kind, selected, driving, cargoType, cameraControls
     }
   }, [selected, onExit])
   useFrame(({ clock }, delta) => {
+    if (!SCENE_MOTION_ENABLED) return
     if (!group.current) return
     const state = drive.current
     const previousX = state.x
@@ -1143,7 +1152,7 @@ export default function PortYard({ vessels, demands, nodes, port, simulationTime
     cameraControls.current?.setLookAt((position[0] + 34) * WORLD_SCALE, 26 * WORLD_SCALE, (position[1] + 37) * WORLD_SCALE, position[0] * WORLD_SCALE, 0, position[1] * WORLD_SCALE, true)
   }, [])
   const exitDrive = useCallback(() => {
-    if (drivingVehicleId) cameraControls.current?.setLookAt(2150, 1450, 2400, 0, 0, 0, true)
+    if (drivingVehicleId) cameraControls.current?.setLookAt(...PORT_AERIAL_POSITION, ...PORT_AERIAL_TARGET, true)
     setDrivingVehicleId(null)
   }, [drivingVehicleId])
   useEffect(() => {
@@ -1153,7 +1162,7 @@ export default function PortYard({ vessels, demands, nodes, port, simulationTime
     const aimAtHarbor = () => {
       if (cancelled) return
       if (cameraControls.current) {
-        cameraControls.current.setLookAt(2150, 1450, 2400, 0, 0, 0, false)
+        cameraControls.current.setLookAt(...PORT_AERIAL_POSITION, ...PORT_AERIAL_TARGET, false)
         return
       }
       if (attempts++ < 120) frame = window.requestAnimationFrame(aimAtHarbor)
@@ -1165,24 +1174,17 @@ export default function PortYard({ vessels, demands, nodes, port, simulationTime
     }
   }, [])
   return <div className="port-canvas-shell">
-    <Canvas shadows dpr={[0.65, 1]} camera={{ position: [2150, 1450, 2400], fov: 38, near: 12, far: 12000 }} gl={{ powerPreference: 'high-performance', antialias: false }} onPointerMissed={() => setSelected(null)}>
+    <Canvas shadows dpr={[0.65, 1]} camera={{ position: PORT_AERIAL_POSITION, fov: 38, near: 12, far: 12000 }} gl={{ powerPreference: 'high-performance', antialias: false }} onPointerMissed={() => setSelected(null)}>
       <Scene vessels={vessels} demands={demands} nodes={nodes} portNodeId={portNodeId} portLatitude={portLatitude} simulationTimeHours={simulationTimeHours} simulationRunning={simulationRunning} clockProfileId={clockProfileId} previewHour={previewHour} select={setSelected} drivingVehicleId={drivingVehicleId} droneMode={droneMode} cameraControls={cameraControls} onDrive={handleDrive} onExitDrive={exitDrive} onExitDrone={() => setDroneMode(false)} />
       <CameraControls ref={cameraControls} makeDefault minDistance={100} maxDistance={7000} minPolarAngle={0.04} maxPolarAngle={Math.PI * 0.38} dollyToCursor smoothTime={0.45} draggingSmoothTime={0.18} />
     </Canvas>
-    <nav className="angle-view-controls" aria-label="Four harbor viewing angles">
-      <small>HARBOR ANGLES</small>
-      <div>{angleViews.map(({ label, x, z }) => <button key={label} aria-label={`View harbor from ${label}`} onClick={() => { setDroneMode(false); cameraControls.current?.setLookAt(x, 1900, z, 0, 0, 0, true) }}>{label}</button>)}</div>
+    <nav className="angle-view-controls" aria-label="Harbor camera and drone controls">
+      <small>HARBOR VIEW</small>
+      <div>{angleViews.map(({ label, x, z }) => <button key={label} aria-label={`View harbor from ${label}`} onClick={() => { setDroneMode(false); cameraControls.current?.setLookAt(x, 2600, z, ...PORT_AERIAL_TARGET, true) }}>{label}</button>)}</div>
       <button className={droneMode ? 'drone-toggle is-active' : 'drone-toggle'} onClick={() => { setDrivingVehicleId(null); setDroneMode(value => !value) }}>{droneMode ? 'EXIT DRONE' : 'FLY DRONE'}</button>
       <small className="camera-hint">DRAG ROTATE · RIGHT-DRAG PAN · WHEEL ZOOM</small>
     </nav>
     {selected && <aside className="object-inspector"><button onClick={() => { setSelected(null); exitDrive() }} aria-label="Close selection">×</button><small>SELECTED 3D ASSET</small><b>{selected.id}</b><span>{selected.title} · {selected.status}</span><p>{selected.detail}</p></aside>}
-    {worldClockVisible ? <aside className="world-clock-panel">
-      <button className="world-clock-close" aria-label="Close day and night controls" onClick={() => setWorldClockVisible(false)}>×</button>
-      <small>HARBOR LIGHT · SIMULATION KEEPS RUNNING</small><b>{previewHour === null ? 'LIVE DAY / NIGHT' : `FROZEN · ${formatHour(previewHour)}`}</b>
-      <input aria-label="Preview harbor time of day" type="range" min="0" max="23.75" step="0.25" value={previewHour ?? Math.min(23.75, ((simulationTimeHours + 12) % 24))} onChange={event => setPreviewHour(Number(event.target.value))} />
-      <div className="world-clock-actions"><button onClick={() => setPreviewHour(previewHour === null ? ((simulationTimeHours % 24) + 24) % 24 : null)}>{previewHour === null ? 'Freeze lighting' : 'Resume live cycle'}</button></div>
-    </aside> : <button className="world-clock-restore" onClick={() => setWorldClockVisible(true)}>☼ <span>Time</span></button>}
-    {drivingVehicleId && <aside className="drive-hud"><button aria-label="Stop driving" onClick={exitDrive}>×</button><small>DRIVING</small><b>{drivingVehicleId}</b><span>W A S D · SPACE BRAKE · ESC EXIT</span></aside>}
     {droneMode && <aside className="drone-hud"><button aria-label="Stop drone flight" onClick={() => setDroneMode(false)}>×</button><small>DRONE FLIGHT</small><span>W A S D FLY · Q / E HEIGHT · CLICK-DRAG STEER · ESC EXIT</span></aside>}
   </div>
 }
