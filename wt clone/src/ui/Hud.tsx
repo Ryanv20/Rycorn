@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { sim, whById, truckById, forkliftById, slotById } from '../sim/sim'
+import { sim, whById, truckById, forkliftById, slotById, dispatchIntercityTransfer } from '../sim/sim'
 import type { Truck, Forklift, Warehouse } from '../sim/sim'
 import type { ItemIcon } from '../sim/world'
 import { useUI } from '../store'
 import {
   IconSearch, IconBell, IconBox, IconTruck, IconClock, IconPlus, IconMinus, IconRotL, IconRotR, IconHome,
   IconChevron, IconChevronDown, IconCheck, IconX, IconTarget, IconDoc, IconPackage, IconForklift, IconDock,
-  IconGrid, Logo,
+  IconGrid, IconPause, IconPlay, IconLayers, IconSun, Logo,
 } from './icons'
 
 // ───────────── helpers
@@ -21,10 +21,10 @@ const clock = (min: number) => {
 function whStats(w: Warehouse) {
   const trucks = sim.trucks.filter((t) => t.whId === w.id)
   const docked = trucks.filter((t) => t.state === 'loading' || t.state === 'unloading' || t.state === 'ready').length
-  const arriving = trucks.filter((t) => t.state === 'enroute').length
+  const arriving = trucks.filter((t) => t.state === 'enroute' || (t.state === 'transit' && t.transferPhase === 'road')).length
   const staged = sim.slots.filter((s) => s.whId === w.id && s.filled).length
-  const onSite = trucks.filter((t) => t.state !== 'enroute' || t.pos.z < -6).filter((t) => t.state !== 'departing' || t.pos.z < -6).length
-  const inbound = trucks.filter((t) => t.state === 'enroute' && t.mode === 'unload').length
+  const onSite = trucks.filter((t) => t.state === 'loading' || t.state === 'unloading' || t.state === 'ready').length
+  const inbound = trucks.filter((t) => (t.state === 'enroute' || (t.state === 'transit' && t.transferPhase === 'road')) && t.mode === 'unload').length
   const fl = sim.forklifts.filter((f) => f.whId === w.id)
   const working = fl.filter((f) => f.phase === 'working').length
   return { docked, arriving, staged, onSite, inbound, fl, working, fill: w.stock / w.capacity }
@@ -34,6 +34,9 @@ type Tone = 'green' | 'amber' | 'blue' | 'grey' | 'red'
 const Chip = ({ tone, children }: { tone: Tone; children: ReactNode }) => <span className={`chip chip-${tone}`}>{children}</span>
 
 export function truckStatus(t: Truck): { label: string; tone: Tone } {
+  if (t.transferPhase === 'road') return { label: 'Between cities', tone: 'blue' }
+  if (t.transferPhase === 'pickup') return { label: 'Transfer pickup', tone: 'amber' }
+  if (t.transferPhase === 'delivery') return { label: 'Transfer delivery', tone: 'green' }
   switch (t.state) {
     case 'enroute':
       return t.pos.z < -6 ? { label: 'Docking', tone: 'grey' } : { label: 'En route', tone: 'blue' }
@@ -66,7 +69,7 @@ const Bar = ({ value, tone = 'blue' }: { value: number; tone?: Tone }) => (
 )
 
 const remainingMin = (t: Truck) => {
-  if (t.state === 'enroute') return Math.max(1, Math.round(((t.path.length * 0.4) / 12) * 0.5 + 0.5))
+  if (t.state === 'enroute' || (t.state === 'transit' && t.transferPhase === 'road')) return Math.max(1, Math.round(((t.path.length * 0.4) / 12) * 0.5 + 0.5))
   if (t.state === 'loading') return (t.cap - t.cargo) * 2 + 1
   if (t.state === 'unloading') return t.cargo * 2 + 1
   return 0
@@ -86,8 +89,16 @@ const ItemGlyph = ({ icon }: { icon: ItemIcon }) => (
 
 export function TopBar() {
   useUI((s) => s.tick)
+  const paused = useUI((s) => s.paused)
+  const setPaused = useUI((s) => s.setPaused)
+  const dayNightEnabled = useUI((s) => s.dayNightEnabled)
+  const setDayNightEnabled = useUI((s) => s.setDayNightEnabled)
+  const layers = useUI((s) => s.layers)
+  const setLayer = useUI((s) => s.setLayer)
+  const setAllLayers = useUI((s) => s.setAllLayers)
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(false)
   const select = useUI((s) => s.select)
   const setActive = useUI((s) => s.setActiveWh)
   const results = useMemo(() => {
@@ -101,6 +112,22 @@ export function TopBar() {
         out.push({ key: t.id, label: t.id, sub: `${t.carrier.name} · ${truckStatus(t).label}`, go: () => select({ type: 'truck', id: t.id }) })
     for (const f of sim.forklifts)
       if (f.id.toLowerCase().includes(k)) out.push({ key: f.id, label: f.id, sub: `Forklift · ${f.whId}`, go: () => select({ type: 'forklift', id: f.id }) })
+    for (const x of sim.intercityTransfers) {
+      const from = whById(x.fromWhId)
+      const to = whById(x.toWhId)
+      if (`${x.id} ${from.code} ${to.code} ${from.name} ${to.name}`.toLowerCase().includes(k)) {
+        out.push({
+          key: x.id,
+          label: x.id,
+          sub: `${from.code} → ${to.code} · City transfer`,
+          go: () => {
+            const t = truckById(x.truckId)
+            if (t) select({ type: 'truck', id: t.id })
+            else setActive(to.id)
+          },
+        })
+      }
+    }
     return out.slice(0, 7)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, sim.version])
@@ -133,9 +160,50 @@ export function TopBar() {
         )}
       </div>
       <SiteSelect />
-      <div className="live">
-        <span className="live-dot" /> Live <b>{clock(sim.time)}</b>
+      <div className="topbar-popover-wrap">
+        <button className={`icon-btn layer-toggle ${layersOpen ? 'on' : ''}`} onClick={() => setLayersOpen((value) => !value)} aria-label="Layers" aria-expanded={layersOpen} title="Layers">
+          <IconLayers /><span>Layers</span>
+        </button>
+        {layersOpen && <div className="layers-menu card">
+          <div className="layers-menu-head"><b>Scene layers</b><button onClick={() => setAllLayers(false)}>Clear all</button></div>
+          <div className="layers-section-label">3D scene</div>
+          {([
+            ['city', 'Cities and roads'],
+            ['port', 'Port'],
+            ['warehouses', 'Warehouses'],
+            ['vehicles', 'Trucks and forklifts'],
+          ] as const).map(([key, label]) => <label className="layer-row" key={key}>
+            <input type="checkbox" checked={layers[key]} onChange={(event) => setLayer(key, event.target.checked)} />
+            <span>{label}</span>
+          </label>)}
+          <div className="layers-section-label">On-screen panels</div>
+          {([
+            ['kpis', 'Summary cards'],
+            ['infoPanel', 'Network / details panel'],
+            ['shipmentTracking', 'Shipment tracking'],
+            ['fleetPanel', 'Docks and fleet panel'],
+            ['cameraControls', 'Camera controls'],
+          ] as const).map(([key, label]) => <label className="layer-row" key={key}>
+            <input type="checkbox" checked={layers[key]} onChange={(event) => setLayer(key, event.target.checked)} />
+            <span>{label}</span>
+          </label>)}
+          <button className="layers-show-all" onClick={() => setAllLayers(true)}>Show all layers</button>
+        </div>}
       </div>
+      <button className={`icon-btn day-night-toggle ${dayNightEnabled ? 'on' : ''}`} onClick={() => setDayNightEnabled(!dayNightEnabled)} title={dayNightEnabled ? 'Pause day/night cycle' : 'Resume day/night cycle'} aria-label={dayNightEnabled ? 'Pause day and night cycle' : 'Resume day and night cycle'}>
+        <IconSun /><span>Day/night</span>
+      </button>
+      <div className={`live ${paused ? 'is-paused' : ''}`}>
+        <span className="live-dot" /> {paused ? 'Paused' : 'Live'} <b>{clock(sim.time)}</b>
+      </div>
+      <button
+        className={`icon-btn engine-toggle ${paused ? 'paused' : ''}`}
+        onClick={() => setPaused(!paused)}
+        title={paused ? 'Resume simulation' : 'Pause simulation'}
+        aria-label={paused ? 'Resume simulation' : 'Pause simulation'}
+      >
+        {paused ? <IconPlay /> : <IconPause />}
+      </button>
       <button className="icon-btn bell">
         <IconBell />
         <span className="badge-dot" />
@@ -232,6 +300,7 @@ function SiteSelect() {
 
 export function Kpis() {
   useUI((s) => s.tick)
+  const visible = useUI((s) => s.layers.kpis)
   const active = useUI((s) => s.activeWh)
   const list = active === 'all' ? sim.warehouses : [whById(active)]
   const stock = list.reduce((a, w) => a + w.stock, 0)
@@ -239,6 +308,7 @@ export function Kpis() {
   const inbound = list.reduce((a, w) => a + whStats(w).arriving, 0)
   const onTime = list.reduce((a, w) => a + w.onTime, 0) / list.length
   const tag = active === 'all' ? 'all sites' : active
+  if (!visible) return null
   return (
     <div className="kpis">
       <Kpi icon={<IconBox />} label="Stock on hand" value={fmt(stock)} delta="+15" sub={`pallets · ${tag}`} />
@@ -265,6 +335,8 @@ const Kpi = ({ icon, label, value, delta, sub }: { icon: ReactNode; label: strin
 
 export function CamToolbar() {
   const cam = useUI((s) => s.cam)
+  const visible = useUI((s) => s.layers.cameraControls)
+  if (!visible) return null
   return (
     <div className="card cam-toolbar">
       <button title="Zoom in" onClick={() => cam({ kind: 'zoom', dir: 1 })}><IconPlus /></button>
@@ -281,8 +353,10 @@ export function CamToolbar() {
 
 export function SidePanel() {
   useUI((s) => s.tick)
+  const visible = useUI((s) => s.layers.infoPanel)
   const sel = useUI((s) => s.selected)
   const active = useUI((s) => s.activeWh)
+  if (!visible) return null
   if (sel?.type === 'truck' && truckById(sel.id)) return <TruckDetail t={truckById(sel.id)!} />
   if (sel?.type === 'forklift' && forkliftById(sel.id)) return <ForkliftDetail f={forkliftById(sel.id)!} />
   if (sel?.type === 'slot' && slotById(sel.id)) return <SlotDetail id={sel.id} />
@@ -401,7 +475,7 @@ function NetworkDetail() {
   const cap = sim.warehouses.reduce((a, w) => a + w.capacity, 0)
   return (
     <aside className="card side">
-      <PanelHead kicker="Network" title="All sites" sub="New Jersey region · 5 sites" icon={<IconGrid />} />
+      <PanelHead kicker="Network" title="All sites" sub={`Port network · ${sim.warehouses.length} sites`} icon={<IconGrid />} />
       <div className="tiles">
         <div className="tile">
           <span>Network stock</span>
@@ -625,11 +699,12 @@ function focusTruck(active: string, selId?: string): Truck | undefined {
 
 export function ShipmentTracking() {
   useUI((s) => s.tick)
+  const visible = useUI((s) => s.layers.shipmentTracking)
   const active = useUI((s) => s.activeWh)
   const sel = useUI((s) => s.selected)
   const select = useUI((s) => s.select)
   const t = focusTruck(active, sel?.type === 'truck' ? sel.id : undefined)
-  if (!t) return null
+  if (!visible || !t) return null
   const w = t.whId ? whById(t.whId) : null
   const load = t.mode === 'load'
   const n = load ? t.cargo : t.cap - t.cargo
@@ -679,7 +754,11 @@ export function ShipmentTracking() {
           </div>
           <div className="grow">
             <b>{t.shipment}</b>
-            <div className="small muted">To: {load ? t.city : w?.name}</div>
+            <div className="small muted">
+              {t.transferId
+                ? `Transfer: ${whById(t.transferFromWhId!).code} → ${whById(t.transferToWhId!).code}`
+                : `To: ${load ? t.city : w?.name}`}
+            </div>
             <Chip tone={st.tone}>{st.label}</Chip>
             <div className="small muted">
               {bay} · {remainingMin(t)} min left
@@ -696,18 +775,27 @@ export function ShipmentTracking() {
 
 export function FleetPanel() {
   useUI((s) => s.tick)
+  const visible = useUI((s) => s.layers.fleetPanel)
   const active = useUI((s) => s.activeWh)
   const tab = useUI((s) => s.fleetTab)
   const setTab = useUI((s) => s.setFleetTab)
   const select = useUI((s) => s.select)
+  const setActive = useUI((s) => s.setActiveWh)
   const sel = useUI((s) => s.selected)
+  const [transferNotice, setTransferNotice] = useState('')
   const whs = active === 'all' ? sim.warehouses : [whById(active)]
   const trucks = sim.trucks.filter((t) => t.whId && whs.some((w) => w.id === t.whId))
   const fls = sim.forklifts.filter((f) => whs.some((w) => w.id === f.whId))
-  const docks = whs.flatMap((w) => w.dockState.map((d, i) => ({ w, d, i, t: truckById(d.truckId) })))
-  const busy = docks.filter((d) => d.t && (d.t.state === 'loading' || d.t.state === 'unloading' || d.t.state === 'ready')).length
+  const docks = whs.flatMap((w) => w.dockState.map((d, i) => {
+    const candidate = truckById(d.truckId)
+    const atDock = !!candidate && candidate.whId === w.id && candidate.dock === i &&
+      (candidate.state === 'loading' || candidate.state === 'unloading' || candidate.state === 'ready')
+    return { w, d, i, t: atDock ? candidate : undefined }
+  }))
+  const busy = docks.filter(({ d }) => d.reserved).length
   const working = fls.filter((f) => f.phase === 'working').length
 
+  if (!visible) return null
   return (
     <div className="card fleet">
       <div className="fleet-head">
@@ -722,12 +810,31 @@ export function FleetPanel() {
           <button className={tab === 'trucks' ? 'on' : ''} onClick={() => setTab('trucks')}>
             Trucks <span>{trucks.length}</span>
           </button>
+          <button className={tab === 'transfers' ? 'on' : ''} onClick={() => setTab('transfers')}>
+            Transfers <span>{sim.intercityTransfers.filter((x) => x.status !== 'complete').length}</span>
+          </button>
         </div>
-        <span className="small muted">{active === 'all' ? 'All sites' : whById(active).name}</span>
+        <span className="small muted">{tab === 'transfers' ? 'Across the port network' : active === 'all' ? 'All sites' : whById(active).name}</span>
       </div>
       <div className="fleet-list">
+        {tab === 'transfers' && (
+          <button
+            className="fleet-row"
+            onClick={() => {
+              const started = dispatchIntercityTransfer()
+              setTransferNotice(started ? 'Cross-city load dispatched' : 'No free dock or transfer slot')
+              useUI.getState().bump()
+            }}
+          >
+            <span className="fr-key"><b>Dispatch freight</b><span>Across all sites</span></span>
+            <span className="fr-main">Move stock between sites</span>
+            <Chip tone={transferNotice.startsWith('Cross') ? 'green' : 'blue'}>{transferNotice || 'Dispatch'}</Chip>
+            <span className="fr-extra" />
+            <IconChevron className="muted" />
+          </button>
+        )}
         {tab === 'docks' &&
-          docks.map(({ w, i, t }) => {
+          docks.map(({ w, d, i, t }) => {
             const docked = t && t.state !== 'enroute'
             const st = t ? truckStatus(t) : null
             const n = t ? (t.mode === 'load' ? t.cargo : t.cap - t.cargo) : 0
@@ -742,10 +849,12 @@ export function FleetPanel() {
                     <span className={`dot ${docked ? 'dot-blue' : 'dot-grey'}`} />
                     {t.id} · {t.carrier.name}
                   </span>
+                ) : d.reserved ? (
+                  <span className="fr-main muted">Reserved for city transfer</span>
                 ) : (
                   <span className="fr-main muted">No truck assigned</span>
                 )}
-                {st ? <Chip tone={st.tone}>{st.label}</Chip> : <Chip tone="grey">Available</Chip>}
+                {st ? <Chip tone={st.tone}>{st.label}</Chip> : d.reserved ? <Chip tone="amber">Reserved</Chip> : <Chip tone="grey">Available</Chip>}
                 <span className="fr-extra">
                   {t && docked ? (
                     <>
@@ -793,7 +902,7 @@ export function FleetPanel() {
                 </span>
                 <span className="fr-main">
                   <span className="dot dot-blue" />
-                  {t.state === 'enroute' ? `To ${w.code}` : `${w.code} · Bay ${(t.dock ?? 0) + 1}`}
+                  {t.transferPhase === 'road' ? 'Port network transfer' : t.state === 'enroute' ? `To ${w.code}` : `${w.code} · Bay ${(t.dock ?? 0) + 1}`}
                 </span>
                 <Chip tone={st.tone}>{st.label}</Chip>
                 <span className="fr-extra">
@@ -812,6 +921,34 @@ export function FleetPanel() {
               </button>
             )
           })}
+        {tab === 'transfers' &&
+          sim.intercityTransfers.map((x) => {
+            const truck = truckById(x.truckId)
+            const from = whById(x.fromWhId)
+            const to = whById(x.toWhId)
+            const itemName = x.itemName
+            const tone: Tone = x.status === 'complete' ? 'green' : x.status === 'on-road' ? 'blue' : 'amber'
+            const label = x.status === 'on-road' ? 'Between cities' : x.status === 'complete' ? 'Delivered' : x.status === 'loading' ? 'Loading' : 'Unloading'
+            return (
+              <button
+                key={x.id}
+                className={`fleet-row ${truck && sel?.type === 'truck' && sel.id === truck.id ? 'on' : ''}`}
+                onClick={() => (truck ? select({ type: 'truck', id: truck.id }) : setActive(to.id))}
+              >
+                <span className="fr-key">
+                  <b>{x.id}</b>
+                  <span>{itemName}</span>
+                </span>
+                <span className="fr-main">{from.code} → {to.code}</span>
+                <Chip tone={tone}>{label}</Chip>
+                <span className="fr-extra"><small>{x.quantity} pallets</small></span>
+                <IconChevron className="muted" />
+              </button>
+            )
+          })}
+        {tab === 'transfers' && sim.intercityTransfers.length === 0 && (
+          <div className="fleet-row muted">No port network transfers yet</div>
+        )}
       </div>
     </div>
   )

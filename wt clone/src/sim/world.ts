@@ -19,6 +19,10 @@ export const SLOT_ROWS = [-21.5, -15.5]
 export const SLOT_COLS = 4
 export const SLOT_STEP = 2.4
 export const CITY_B_OFFSET_Z = -220
+export const CITY_C_OFFSET_Z = -440
+export const PORT_1_OFFSET_Z = 0
+export const PORT_2_OFFSET_Z = CITY_B_OFFSET_Z
+export const PORT_MAIN_OFFSET_Z = CITY_C_OFFSET_Z
 export const zoneZ = (w: Pick<WarehouseDef, 'zOffset'>, z: number) => z + (w.zOffset ?? 0)
 
 export type WarehouseStyle = 'blue' | 'white' | 'cold'
@@ -34,7 +38,8 @@ export interface InventoryItem {
 export interface WarehouseDef {
   id: string
   code: string
-  city: 'A' | 'B'
+  city: 'A' | 'B' | 'C' | 'P1' | 'P2' | 'P3'
+  attachedCity?: 'A' | 'B' | 'C'
   zOffset: number
   name: string
   kind: string
@@ -109,6 +114,38 @@ const CITY_A_WAREHOUSES: WarehouseDef[] = [
   },
 ]
 
+const CITY_C_WAREHOUSES: WarehouseDef[] = CITY_A_WAREHOUSES.map((w) => ({
+  ...w,
+  id: `C-${w.id}`,
+  code: `C-${w.code}`,
+  city: 'C',
+  zOffset: CITY_C_OFFSET_Z,
+  name: `${w.name} C`,
+  address: `City C · ${w.address}`,
+  inventory: w.inventory.map((item) => ({ ...item })),
+}))
+
+const makePortWarehouse = (city: 'P1' | 'P2' | 'P3', attachedCity: 'A' | 'B' | 'C', offset: number, label: string): WarehouseDef => {
+  const source = CITY_A_WAREHOUSES[0]
+  return {
+    ...source,
+    id: `${city}-TERMINAL`,
+    code: `${city}-01`,
+    city,
+    attachedCity,
+    zOffset: offset,
+    name: `${label} Terminal Operations`,
+    kind: 'Port Terminal',
+    address: `${label} Harbor · attached to City ${attachedCity}`,
+    cx: 250,
+    docks: 4,
+    capacity: 5200,
+    stock: 3710,
+    forklifts: 4,
+    inventory: source.inventory.map((item) => ({ ...item })),
+  }
+}
+
 export const WAREHOUSES: WarehouseDef[] = [
   ...CITY_A_WAREHOUSES,
   ...CITY_A_WAREHOUSES.map((w) => ({
@@ -121,6 +158,10 @@ export const WAREHOUSES: WarehouseDef[] = [
     address: `City B · ${w.address}`,
     inventory: w.inventory.map((item) => ({ ...item })),
   })),
+  ...CITY_C_WAREHOUSES,
+  makePortWarehouse('P1', 'A', PORT_1_OFFSET_Z, 'Port District 1'),
+  makePortWarehouse('P2', 'B', PORT_2_OFFSET_Z, 'Port District 2'),
+  makePortWarehouse('P3', 'C', PORT_MAIN_OFFSET_Z, 'Los Angeles Main Port'),
 ]
 
 export const dockSpan = (w: WarehouseDef) => ((w.docks - 1) / 2) * DOCK_SPACING

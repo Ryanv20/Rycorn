@@ -50,24 +50,54 @@ find_open_port() {
 api_port="$(find_open_port "${RYCORN_API_PORT:-3000}")"
 client_port="$(find_open_port "${RYCORN_CLIENT_PORT:-5173}")"
 port_console_port="$(find_open_port "${RYCORN_PORT_CONSOLE_PORT:-5176}")"
+waretrack_port="$(find_open_port "${RYCORN_WARETRACK_PORT:-5177}")"
 export RYCORN_API_PORT="$api_port"
 export RYCORN_CLIENT_PORT="$client_port"
 export RYCORN_PORT_CONSOLE_PORT="$port_console_port"
+export RYCORN_WARETRACK_PORT="$waretrack_port"
 export VITE_RYCORN_API_PORT="$api_port"
 export NEXT_PUBLIC_RYCORN_API_ORIGIN="http://localhost:${api_port}"
 
-echo "Starting Rycorn API, WebSocket server, network client, and Los Angeles port console..."
+waretrack_dir="$(cd -- "$repo_root/../WT/waretrack" 2>/dev/null && pwd)" || {
+  echo "Waretrack system directory is missing: ../WT/waretrack" >&2
+  exit 1
+}
+if [[ ! -f "$waretrack_dir/package.json" || ! -f "$waretrack_dir/pnpm-lock.yaml" ]]; then
+  echo "Waretrack package files are missing from $waretrack_dir" >&2
+  exit 1
+fi
+
+echo "Preparing Waretrack dependencies from the local pnpm cache (offline)..."
+if ! pnpm --dir "$waretrack_dir" install --offline --frozen-lockfile; then
+  echo "Waretrack cannot start offline because a dependency is missing from the local pnpm cache." >&2
+  echo "Reconnect once and run: pnpm --dir '$waretrack_dir' install" >&2
+  exit 1
+fi
+
+echo "Starting Rycorn API, WebSocket server, network client, Los Angeles port console, and Waretrack..."
 echo "API: http://localhost:${api_port}"
 echo "Network client: http://localhost:${client_port}"
 echo "Los Angeles port console: http://localhost:${port_console_port}"
+echo "Waretrack: http://localhost:${waretrack_port}"
 echo "Initialize and run the simulation from either console."
 lan_addresses="$(hostname -I 2>/dev/null || true)"
 if [[ -n "$lan_addresses" ]]; then
   for address in $lan_addresses; do
     echo "Phone on the same Wi-Fi (network client): http://${address}:${client_port}"
     echo "Phone on the same Wi-Fi (LA port console): http://${address}:${port_console_port}"
+    echo "Phone on the same Wi-Fi (Waretrack): http://${address}:${waretrack_port}"
   done
 else
-  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port} or ${port_console_port}."
+  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port}, ${port_console_port}, or ${waretrack_port}."
 fi
-exec pnpm -r --parallel --filter @rycon/server --filter @rycon/client --filter @rycorn/new-file dev
+
+pnpm -r --parallel --filter @rycon/server --filter @rycon/client --filter @rycorn/new-file dev &
+rycorn_pid=$!
+pnpm --dir "$waretrack_dir" exec vite --host 0.0.0.0 --port "$waretrack_port" &
+waretrack_pid=$!
+cleanup() {
+  kill "$rycorn_pid" "$waretrack_pid" 2>/dev/null || true
+  wait "$rycorn_pid" "$waretrack_pid" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+wait -n "$rycorn_pid" "$waretrack_pid"

@@ -38,7 +38,7 @@ type Selection = { id: string; title: string; status: string; detail: string } |
 type Point = [number, number]
 type WorldPoint = [number, number, number]
 const WORLD_SCALE = 6.32 // 10x the previous ground footprint while preserving 3D proportions.
-const SCENE_MOTION_ENABLED = false
+const SCENE_MOTION_ENABLED = true
 const PORT_AERIAL_TARGET: WorldPoint = [330, 0, 50]
 const PORT_AERIAL_POSITION: WorldPoint = [550, 4200, 850]
 const isTanker = (vessel: YardVessel) => /tanker|oil|liquid|chemical/i.test(`${vessel.type ?? ''} ${vessel.capability}`)
@@ -1136,9 +1136,9 @@ export default function PortYard({ vessels, demands, nodes, port, simulationTime
   const [worldClockVisible, setWorldClockVisible] = useState(true)
   const [previewHour, setPreviewHour] = useState<number | null>(null)
   const cameraControls = useRef<CameraControls | null>(null)
-  const portId = port?.portId ?? '19WPI-16080'
+  const portId = port?.portId ?? '19WPI-46135-LEKKI-6-42320-4-00824'
   const portNodeId = `node-${portId}`
-  const portLatitude = port?.latitude ?? 33.75
+  const portLatitude = port?.latitude ?? 6.423198
   const angleViews: Array<{ label: string; x: number; z: number }> = [
     { label: 'NW', x: -2300, z: 2500 },
     { label: 'NE', x: 2300, z: 2500 },

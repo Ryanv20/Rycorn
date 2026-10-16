@@ -10,7 +10,7 @@ From the repository root:
 ./Rycorn
 ```
 
-The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server, network client, and Los Angeles port console together. Open either console URL printed by the launcher and initialize the simulation from its controls. The launcher selects available ports (3000, 5173, and 5176 by default); set `RYCORN_API_PORT`, `RYCORN_CLIENT_PORT`, or `RYCORN_PORT_CONSOLE_PORT` to choose a starting port. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
+The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server, network client, Los Angeles port console, and Waretrack together. Open any URL printed by the launcher. The launcher selects available ports (3000, 5173, 5176, and 5177 by default); set `RYCORN_API_PORT`, `RYCORN_CLIENT_PORT`, `RYCORN_PORT_CONSOLE_PORT`, or `RYCORN_WARETRACK_PORT` to choose a starting port. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
 
 ## Tests
 

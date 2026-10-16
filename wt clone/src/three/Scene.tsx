@@ -9,10 +9,20 @@ import type { Selection } from '../store'
 import { TruckModel, ForkliftModel } from './Vehicles'
 import { WarehouseModel } from './Warehouse'
 import { World } from './Environment'
+import { advanceDayNight, daylightAmount, sunElevation } from './dayNight'
 
 initSim()
 
 const VIEW_OFFSET = new THREE.Vector3(66, 74, 80)
+const NETWORK_OVERVIEW = { x: 400, y: 2300, z: 180, targetX: 400, targetZ: -290 }
+const NIGHT_SKY = new THREE.Color('#17233b')
+const DAY_SKY = new THREE.Color('#eceffa')
+const TWILIGHT_SKY = new THREE.Color('#c78375')
+const NIGHT_LIGHT = new THREE.Color('#94a9dc')
+const DAY_LIGHT = new THREE.Color('#fffaf0')
+const TWILIGHT_LIGHT = new THREE.Color('#ffb16e')
+const NIGHT_GROUND = new THREE.Color('#33384c')
+const DAY_GROUND = new THREE.Color('#d9def0')
 const whFocus = (id: string) => {
   const w = whById(id)
   return new THREE.Vector3(w.cx, 0, FRONT_Z + 10 + w.zOffset)
@@ -20,8 +30,10 @@ const whFocus = (id: string) => {
 
 function SimDriver() {
   const bump = useUI((s) => s.bump)
+  const paused = useUI((s) => s.paused)
   const acc = useRef(0)
   useFrame((_, dt) => {
+    if (paused) return
     stepSim(dt)
     acc.current += dt
     if (acc.current > 0.2) {
@@ -34,6 +46,11 @@ function SimDriver() {
 
 function selectionPos(sel: Selection): THREE.Vector3 | null {
   if (!sel) return null
+  if (sel.type === 'ship') {
+    if (sel.id === 'POLA-CARGO-01') return new THREE.Vector3(590, 0, -510)
+    const bargeOffset = Number(sel.id.replace('POLA-BARGE-', ''))
+    return new THREE.Vector3(556, 0, bargeOffset - 66)
+  }
   if (sel.type === 'truck') {
     const t = truckById(sel.id)
     return t ? new THREE.Vector3(t.pos.x, 0, t.pos.z) : null
@@ -46,16 +63,28 @@ function selectionPos(sel: Selection): THREE.Vector3 | null {
   return s ? new THREE.Vector3(s.x, 0, s.z) : null
 }
 
-function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | null> }) {
+function CameraRig({
+  light,
+  hemisphere,
+  ambient,
+}: {
+  light: React.RefObject<THREE.DirectionalLight | null>
+  hemisphere: React.RefObject<THREE.HemisphereLight | null>
+  ambient: React.RefObject<THREE.AmbientLight | null>
+}) {
   const ref = useRef<CameraControls>(null)
   const camCmd = useUI((s) => s.camCmd)
   const activeWh = useUI((s) => s.activeWh)
   const tmp = useMemo(() => new THREE.Vector3(), [])
+  const skyColor = useMemo(() => new THREE.Color(), [])
+  const sunColor = useMemo(() => new THREE.Color(), [])
+  const groundColor = useMemo(() => new THREE.Color(), [])
+  const { scene } = useThree()
 
   useEffect(() => {
     const c = ref.current
     if (!c) return
-    c.setLookAt(100, 800, 220, 0, 0, -120, false)
+    c.setLookAt(NETWORK_OVERVIEW.x, NETWORK_OVERVIEW.y, NETWORK_OVERVIEW.z, NETWORK_OVERVIEW.targetX, 0, NETWORK_OVERVIEW.targetZ, false)
     const stop = () => useUI.getState().setFollow(false)
     c.addEventListener('controlstart', stop)
     return () => c.removeEventListener('controlstart', stop)
@@ -68,14 +97,14 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
     if (cmd.kind === 'warehouse' || cmd.kind === 'home') {
       const id = cmd.kind === 'warehouse' ? cmd.id : activeWh
       if (id === 'all') {
-        c.setLookAt(100, 800, 220, 0, 0, -120, true)
+        c.setLookAt(NETWORK_OVERVIEW.x, NETWORK_OVERVIEW.y, NETWORK_OVERVIEW.z, NETWORK_OVERVIEW.targetX, 0, NETWORK_OVERVIEW.targetZ, true)
       } else {
         const t = whFocus(id)
         const p = t.clone().add(VIEW_OFFSET)
         c.setLookAt(p.x, p.y, p.z, t.x, t.y, t.z, true)
       }
     } else if (cmd.kind === 'overview') {
-      c.setLookAt(100, 800, 220, 0, 0, -120, true)
+      c.setLookAt(NETWORK_OVERVIEW.x, NETWORK_OVERVIEW.y, NETWORK_OVERVIEW.z, NETWORK_OVERVIEW.targetX, 0, NETWORK_OVERVIEW.targetZ, true)
     } else if (cmd.kind === 'zoom') {
       c.dolly(cmd.dir * c.distance * 0.25, true)
     } else if (cmd.kind === 'rotate') {
@@ -87,7 +116,8 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camCmd])
 
-  useFrame(() => {
+  useFrame((_, dt) => {
+    const cycleSeconds = advanceDayNight(dt, useUI.getState().dayNightEnabled)
     const c = ref.current
     if (!c) return
     const { follow, selected } = useUI.getState()
@@ -98,7 +128,18 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
     const l = light.current
     if (l) {
       c.getTarget(tmp)
-      l.position.set(tmp.x - 55, 95, tmp.z - 15)
+      const phase = (cycleSeconds / 180) * Math.PI * 2 + Math.PI / 2
+      const elevation = sunElevation(cycleSeconds)
+      const daylight = daylightAmount(cycleSeconds)
+      const twilight = (1 - Math.min(1, Math.abs(elevation) / 0.3)) * 0.55
+      l.position.set(
+        tmp.x + Math.cos(phase) * 160,
+        Math.max(14, 24 + elevation * 120),
+        tmp.z + Math.sin(phase) * 160,
+      )
+      l.intensity = 0.12 + daylight * 2.68
+      sunColor.lerpColors(NIGHT_LIGHT, DAY_LIGHT, daylight).lerp(TWILIGHT_LIGHT, twilight)
+      l.color.copy(sunColor)
       l.target.position.copy(tmp)
       l.target.updateMatrixWorld()
       const d = Math.min(160, Math.max(50, c.distance * 0.75))
@@ -111,6 +152,23 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
         cam.updateProjectionMatrix()
       }
     }
+    const elevation = sunElevation(cycleSeconds)
+    const daylight = daylightAmount(cycleSeconds)
+    const twilight = (1 - Math.min(1, Math.abs(elevation) / 0.3)) * 0.45
+    skyColor.lerpColors(NIGHT_SKY, DAY_SKY, daylight).lerp(TWILIGHT_SKY, twilight)
+    if (scene.background instanceof THREE.Color) scene.background.copy(skyColor)
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.color.copy(skyColor)
+      scene.fog.near = 700 + daylight * 1100
+      scene.fog.far = 3500 + daylight * 3000
+    }
+    if (hemisphere.current) {
+      hemisphere.current.intensity = 0.3 + daylight * 0.75
+      hemisphere.current.color.copy(skyColor)
+      groundColor.lerpColors(NIGHT_GROUND, DAY_GROUND, daylight)
+      hemisphere.current.groundColor.copy(groundColor)
+    }
+    if (ambient.current) ambient.current.intensity = 0.1 + daylight * 0.2
   })
 
   return (
@@ -118,7 +176,7 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
       ref={ref}
       makeDefault
       minDistance={18}
-      maxDistance={1100}
+      maxDistance={4300}
       minPolarAngle={0.25}
       maxPolarAngle={1.15}
       dollyToCursor
@@ -133,6 +191,8 @@ function CameraRig({ light }: { light: React.RefObject<THREE.DirectionalLight | 
 const BOX = {
   truck: { size: [3.2, 4.6, 12], y: 2.3, z: 0 },
   forklift: { size: [2.0, 3.0, 4.0], y: 1.5, z: 0.3 },
+  ship: { size: [24, 17, 148], y: 8.5, z: 0 },
+  barge: { size: [12, 14, 66], y: 7, z: 0 },
   slot: { size: [1.8, 2.0, 1.8], y: 1.0, z: 0 },
 } as const
 
@@ -168,9 +228,16 @@ function SelectionMarker() {
     } else if (sel.type === 'forklift') {
       const f = forkliftById(sel.id)
       if (f) g.position.set(f.pos.x, 0, f.pos.z), (g.rotation.y = f.heading)
-    } else {
+    } else if (sel.type === 'slot') {
       const s = slotById(sel.id)
       if (s) g.position.set(s.x, 0, s.z), (g.rotation.y = 0)
+    } else if (sel.id === 'POLA-CARGO-01') {
+      g.position.set(590, 0, -510)
+      g.rotation.y = 0
+    } else {
+      const bargeOffset = Number(sel.id.replace('POLA-BARGE-', ''))
+      g.position.set(556, 0, bargeOffset - 66)
+      g.rotation.y = 0
     }
     if (ring.current) {
       const k = 1 + ((clock.elapsedTime * 0.8) % 1) * 0.35
@@ -179,9 +246,9 @@ function SelectionMarker() {
     }
   })
   if (!sel) return null
-  const exists = sel.type === 'truck' ? truckById(sel.id) : sel.type === 'forklift' ? forkliftById(sel.id) : slotById(sel.id)
+  const exists = sel.type === 'ship' ? true : sel.type === 'truck' ? truckById(sel.id) : sel.type === 'forklift' ? forkliftById(sel.id) : slotById(sel.id)
   if (!exists) return null
-  const b = BOX[sel.type]
+  const b = sel.type === 'ship' ? (sel.id === 'POLA-CARGO-01' ? BOX.ship : BOX.barge) : BOX[sel.type]
   const r = Math.max(b.size[0], b.size[2]) * 0.62
   return (
     <group ref={group}>
@@ -247,10 +314,12 @@ function Trucks() {
 
 function Lights() {
   const light = useRef<THREE.DirectionalLight>(null)
+  const hemisphere = useRef<THREE.HemisphereLight>(null)
+  const ambient = useRef<THREE.AmbientLight>(null)
   return (
     <>
-      <hemisphereLight args={['#ffffff', '#d9def0', 1.05]} />
-      <ambientLight intensity={0.25} />
+      <hemisphereLight ref={hemisphere} args={['#ffffff', '#d9def0', 1.05]} />
+      <ambientLight ref={ambient} intensity={0.25} />
       <directionalLight
         ref={light}
         intensity={2.8}
@@ -262,7 +331,7 @@ function Lights() {
         shadow-camera-near={1}
         shadow-camera-far={300}
       />
-      <CameraRig light={light} />
+      <CameraRig light={light} hemisphere={hemisphere} ambient={ambient} />
     </>
   )
 }
@@ -271,18 +340,20 @@ function Background() {
   const { scene } = useThree()
   useEffect(() => {
     scene.background = new THREE.Color('#eceffa')
-    scene.fog = new THREE.Fog('#eceffa', 380, 900)
+    scene.fog = new THREE.Fog('#eceffa', 1800, 6500)
   }, [scene])
   return null
 }
 
 export default function Scene() {
   const select = useUI((s) => s.select)
+  const layers = useUI((s) => s.layers)
+  const selected = useUI((s) => s.selected)
   return (
     <Canvas
       shadows
       dpr={[1, 1.75]}
-      camera={{ fov: 30, near: 1, far: 2000, position: [100, 100, 100] }}
+      camera={{ fov: 30, near: 1, far: 8000, position: [100, 100, 100] }}
       onPointerMissed={() => select(null)}
       gl={{ antialias: true }}
     >
@@ -290,15 +361,15 @@ export default function Scene() {
       <SimDriver />
       <Lights />
       <World />
-      {sim.warehouses.map((w) => (
+      {layers.warehouses && sim.warehouses.map((w) => (
         <WarehouseModel key={w.id} w={w} />
       ))}
-      <Trucks />
-      {sim.forklifts.map((f) => (
+      {layers.vehicles && <Trucks />}
+      {layers.vehicles && sim.forklifts.map((f) => (
         <ForkliftModel key={f.id} fl={f} />
       ))}
-      <SelectionMarker />
-      <ForkliftTags />
+      {((layers.vehicles && selected?.type !== 'ship') || (layers.port && selected?.type === 'ship')) && <SelectionMarker />}
+      {layers.vehicles && <ForkliftTags />}
     </Canvas>
   )
 }

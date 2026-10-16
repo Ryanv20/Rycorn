@@ -1,7 +1,7 @@
 import { buildPath, follow } from './path'
 import type { Mover, PathPoint, Vec, Waypoint } from './path'
 import {
-  WAREHOUSES, WORLD_HALF, LANE_EAST, LANE_WEST, YARD_LANE_Z, DOCKED_Z, FORK_LANE_Z, FORK_DOCK_Z, FRONT_Z,
+  WAREHOUSES, WORLD_HALF, CITY_B_OFFSET_Z, CITY_C_OFFSET_Z, LANE_EAST, LANE_WEST, YARD_LANE_Z, DOCKED_Z, FORK_LANE_Z, FORK_DOCK_Z, FRONT_Z,
   SLOT_ROWS, SLOT_COLS, SLOT_STEP, dockX, gapOffset, slotStart, zoneZ,
 } from './world'
 import type { WarehouseDef, InventoryItem } from './world'
@@ -23,6 +23,18 @@ export const CARRIERS: Carrier[] = [
 ]
 
 export type TruckState = 'enroute' | 'loading' | 'unloading' | 'ready' | 'departing' | 'transit'
+export type IntercityTransferStatus = 'loading' | 'on-road' | 'unloading' | 'complete'
+
+export interface IntercityTransfer {
+  id: string
+  truckId: string
+  fromWhId: string
+  toWhId: string
+  itemIndex: number
+  itemName: string
+  quantity: number
+  status: IntercityTransferStatus
+}
 
 export interface Truck extends Mover {
   id: string
@@ -40,6 +52,17 @@ export interface Truck extends Mover {
   wheel: number
   readyTimer: number
   assigned?: string
+  transferId?: string
+  transferPhase?: 'pickup' | 'road' | 'delivery'
+  transferFromWhId?: string
+  transferFromDock?: number
+  transferToWhId?: string
+  transferToDock?: number
+  transferItemIndex?: number
+  transferItemName?: string
+  testRoute?: 'pier'
+  testDirection?: 'AtoB' | 'BtoA'
+  testTurnSide?: 'left' | 'right'
   times: number[] // sim-minutes for tracking steps
   plate: string
 }
@@ -129,7 +152,9 @@ export const sim = {
   trucks: [] as Truck[],
   forklifts: [] as Forklift[],
   slots: [] as Slot[],
-  transitTimer: [2, 5, 4, 7],
+  transitTimer: [2, 5, 4, 7, 3, 8],
+  intercityTimer: 1,
+  intercityTransfers: [] as IntercityTransfer[],
   version: 0, // bumped when entity lists change
 }
 
@@ -191,6 +216,96 @@ function departureWaypoints(w: Warehouse, dock: number): Waypoint[] {
   ]
 }
 
+const INTERCITY_LINK_X = 320
+
+function intercityWaypoints(from: Warehouse, fromDock: number, to: Warehouse, toDock: number): Waypoint[] {
+  const fromX = dockX(from, fromDock)
+  const toX = dockX(to, toDock)
+  return [
+    { x: fromX, z: zoneZ(from, -11) },
+    { x: fromX - 7, z: zoneZ(from, -4.5) },
+    { x: fromX - 18, z: zoneZ(from, LANE_EAST) },
+    { x: INTERCITY_LINK_X, z: zoneZ(from, LANE_EAST) },
+    { x: INTERCITY_LINK_X, z: zoneZ(to, LANE_EAST) },
+    { x: toX + 30, z: zoneZ(to, LANE_EAST) },
+    ...arrivalWaypoints(to, toDock),
+  ]
+}
+
+let transferSeq = 1
+
+export function dispatchIntercityTransfer() {
+  const active = sim.intercityTransfers.filter((x) => x.status !== 'complete').length
+  if (active >= 1) return false
+  const sources = sim.warehouses.filter((w) => w.dockState.some((d) => !d.reserved))
+  if (!sources.length) return false
+  const source = pick(sources)
+  const fromDock = source.dockState.findIndex((d) => !d.reserved)
+  if (fromDock < 0) return false
+
+  const destinations = sim.warehouses
+    .filter((w) => w.city !== source.city && w.dockState.some((d) => !d.reserved) &&
+      source.inventory.some((item) => w.inventory.some((other) => other.name === item.name)))
+    .sort((a, b) => a.stock / a.capacity - b.stock / b.capacity)
+  const destination = destinations[0]
+  if (!destination) return false
+  const toDock = destination.dockState.findIndex((d) => !d.reserved)
+  if (toDock < 0) return false
+
+  const sharedItems = source.inventory
+    .map((item, index) => ({ item, index, destinationItem: destination.inventory.find((other) => other.name === item.name) }))
+    .filter((entry) => entry.destinationItem)
+  const chosenItem = sharedItems.sort((a, b) =>
+    (b.item.qty - (b.destinationItem?.qty ?? 0)) - (a.item.qty - (a.destinationItem?.qty ?? 0)))[0]
+  if (!chosenItem) return false
+  const itemIndex = chosenItem.index
+  const itemName = chosenItem.item.name
+  const transferId = `XFR-${String(transferSeq++).padStart(4, '0')}`
+  const truck = makeTruck({
+    state: 'loading',
+    whId: source.id,
+    dock: fromDock,
+    mode: 'load',
+    cargo: 0,
+    cap: 1,
+    shipment: transferId,
+    customer: destination.name,
+    city: destination.name,
+    pos: { x: dockX(source, fromDock), z: zoneZ(source, DOCKED_Z) },
+    heading: 0,
+    finalHeading: 0,
+    transferId,
+    transferPhase: 'pickup',
+    transferFromWhId: source.id,
+    transferFromDock: fromDock,
+    transferToWhId: destination.id,
+    transferToDock: toDock,
+    transferItemIndex: itemIndex,
+    transferItemName: itemName,
+  })
+  source.dockState[fromDock] = { truckId: truck.id, reserved: true, open: 1, hold: 0 }
+  destination.dockState[toDock] = { truckId: truck.id, reserved: true, open: 0, hold: 0 }
+  sim.trucks.push(truck)
+  sim.intercityTransfers.unshift({
+    id: transferId,
+    truckId: truck.id,
+    fromWhId: source.id,
+    toWhId: destination.id,
+    itemIndex,
+    itemName,
+    quantity: truck.cap,
+    status: 'loading',
+  })
+  sim.intercityTransfers.length = Math.min(sim.intercityTransfers.length, 12)
+  sim.version++
+  return true
+}
+
+function setTransferStatus(t: Truck, status: IntercityTransferStatus) {
+  const transfer = sim.intercityTransfers.find((x) => x.id === t.transferId)
+  if (transfer) transfer.status = status
+}
+
 function filledSlots(w: Warehouse) {
   return sim.slots.filter((s) => s.whId === w.id && s.filled).length
 }
@@ -243,7 +358,7 @@ function spawnDocked(w: Warehouse, dock: number) {
 
 function spawnTransit(lane: number) {
   const east = lane % 2 === 0
-  const cityOffset = lane >= 2 ? WAREHOUSES.find((w) => w.city === 'B')?.zOffset ?? 0 : 0
+  const cityOffset = [0, CITY_B_OFFSET_Z, CITY_C_OFFSET_Z][Math.floor(lane / 2) % 3]
   const z = (east ? LANE_EAST : LANE_WEST) + cityOffset
   const x0 = east ? -WORLD_HALF - 20 : WORLD_HALF + 20
   const t = makeTruck({
@@ -259,9 +374,39 @@ function spawnTransit(lane: number) {
 }
 
 function stepTruck(t: Truck, dt: number) {
-  const done = follow(t, dt, truckSpeed, 10, 0.9)
+  // City-to-city legs run on the arterial outside the warehouse yard speed limit.
+  // The ordinary yard speed rule treats the north/south link as a loading lane,
+  // which made a 220 m intercity trip take several minutes to appear complete.
+  const done = follow(t, dt, (point) => (t.transferPhase === 'road' ? 20 : truckSpeed(point)), 10, 0.9)
   const reversing = t.path.length > 0 && t.path[0].rev
   t.wheel += ((t.speed * dt) / 0.5) * (reversing ? -1 : 1)
+
+  // One free test vehicle loops along Pier Street between the two city roads.
+  if (t.testRoute === 'pier') {
+    if (done) {
+      // Alternate a right or left turn at City B, return to City A on that
+      // street, then rejoin Pier Street for the next intercity leg.
+      t.testDirection = 'BtoA'
+      t.testTurnSide = t.testTurnSide === 'right' ? 'left' : 'right'
+      const branchX = t.testTurnSide === 'right' ? 50 : -150
+      const branchLaneX = branchX - 1.5
+      const highwayLaneZ = t.testTurnSide === 'right' ? -217 : -223
+      const aHighwayLaneZ = t.testTurnSide === 'right' ? -3 : 3
+      t.path = buildPath(t.pos, [
+        { x: -50, z: -220 },
+        { x: t.testTurnSide === 'right' ? -47 : -53, z: highwayLaneZ },
+        { x: branchX, z: highwayLaneZ },
+        { x: branchX, z: -220 },
+        { x: branchLaneX, z: -220 },
+        { x: branchLaneX, z: 0 },
+        { x: branchX, z: 0 },
+        { x: -50, z: aHighwayLaneZ },
+        { x: -48.5, z: 0 },
+        { x: -48.5, z: LANE_EAST - 220 },
+      ])
+    }
+    return
+  }
 
   if (t.state === 'enroute' && done) {
     const w = whById(t.whId!)
@@ -280,9 +425,23 @@ function stepTruck(t: Truck, dt: number) {
       const w = whById(t.whId!)
       t.state = 'departing'
       t.times[3] = sim.time
-      t.path = buildPath(t.pos, departureWaypoints(w, t.dock!))
       t.finalHeading = undefined
-      if (t.mode === 'load') w.outbound++
+      if (t.transferPhase === 'pickup') {
+        const from = whById(t.transferFromWhId!)
+        const to = whById(t.transferToWhId!)
+        const fromDock = t.transferFromDock!
+        t.path = buildPath(t.pos, intercityWaypoints(from, fromDock, to, t.transferToDock!))
+        t.whId = to.id
+        t.dock = t.transferToDock
+        t.mode = 'unload'
+        t.state = 'transit'
+        t.transferPhase = 'road'
+        from.outbound++
+        setTransferStatus(t, 'on-road')
+      } else {
+        t.path = buildPath(t.pos, departureWaypoints(w, t.dock!))
+        if (t.mode === 'load') w.outbound++
+      }
     }
   } else if (t.state === 'departing') {
     const w = whById(t.whId!)
@@ -293,7 +452,24 @@ function stepTruck(t: Truck, dt: number) {
     }
   }
 
-  if ((t.state === 'departing' || t.state === 'transit') && done) {
+  if (t.transferPhase === 'road' && t.transferFromWhId && t.transferFromDock !== undefined) {
+    const from = whById(t.transferFromWhId)
+    const fromDock = from.dockState[t.transferFromDock]
+    if (fromDock.truckId === t.id && t.pos.z > zoneZ(from, -9)) {
+      fromDock.truckId = undefined
+      fromDock.reserved = false
+    }
+  }
+
+  if (t.state === 'transit' && t.transferPhase === 'road' && done) {
+    const destination = whById(t.whId!)
+    t.state = 'unloading'
+    t.transferPhase = 'delivery'
+    t.times[2] = sim.time
+    destination.dockState[t.dock!].open = 1
+    setTransferStatus(t, 'unloading')
+  } else if ((t.state === 'departing' || (t.state === 'transit' && !t.transferPhase)) && done) {
+    if (t.transferId) setTransferStatus(t, 'complete')
     sim.trucks.splice(sim.trucks.indexOf(t), 1)
     sim.version++
   }
@@ -420,7 +596,11 @@ function planForklift(f: Forklift) {
         s ? { type: 'slot', slot: s } : { type: 'door', dock },
         { type: 'dock', dock },
         () => (s ? pickSlot(f, s) : (f.carrying = rnd() < 0.3 ? 'blue' : 'box')),
-        () => { truck.cargo++; w.stock--; jitterInventory(w, -1) },
+        () => {
+          truck.cargo++
+          w.stock = Math.max(0, w.stock - 1)
+          jitterInventory(w, -1, truck.transferPhase ? truck.transferItemName : undefined)
+        },
       )
     } else {
       const s = fillRatio(w) < 0.7 ? nearestSlot(w, d, false) : undefined
@@ -431,7 +611,12 @@ function planForklift(f: Forklift) {
         { type: 'dock', dock },
         s ? { type: 'slot', slot: s } : { type: 'door', dock },
         () => { truck.cargo--; f.carrying = rnd() < 0.35 ? 'blue' : 'box' },
-        () => { if (s) dropSlot(f, s); w.stock++; w.putaways++; jitterInventory(w, 1) },
+        () => {
+          if (s) dropSlot(f, s)
+          w.stock = Math.min(w.capacity, w.stock + 1)
+          w.putaways++
+          jitterInventory(w, 1, truck.transferPhase ? truck.transferItemName : undefined)
+        },
       )
     }
     return
@@ -479,8 +664,8 @@ function planForklift(f: Forklift) {
   f.queue.push({ t: 'wait', d: 1.2 })
 }
 
-function jitterInventory(w: Warehouse, dir: number) {
-  const item = pick(w.inventory)
+function jitterInventory(w: Warehouse, dir: number, name?: string) {
+  const item = name ? w.inventory.find((i) => i.name === name) ?? pick(w.inventory) : pick(w.inventory)
   item.qty = Math.max(0, item.qty + dir * Math.floor(range(4, 40)))
 }
 
@@ -536,9 +721,10 @@ function stepForklift(f: Forklift, dt: number) {
 // ───────────────────────────── warehouses
 
 function stepWarehouse(w: Warehouse, dt: number) {
-  for (const ds of w.dockState) {
+  for (let i = 0; i < w.dockState.length; i++) {
+    const ds = w.dockState[i]
     const t = truckById(ds.truckId)
-    const atDock = !!t && (t.state === 'loading' || t.state === 'unloading' || t.state === 'ready')
+    const atDock = !!t && t.whId === w.id && t.dock === i && (t.state === 'loading' || t.state === 'unloading' || t.state === 'ready')
     ds.open += ((atDock || ds.hold > 0 ? 1 : 0) - ds.open) * (1 - Math.exp(-2.5 * dt))
   }
   w.spawnTimer -= dt
@@ -562,11 +748,17 @@ export function stepSim(dtRaw: number) {
       spawnTransit(i)
     }
   }
+  sim.intercityTimer -= dt
+  if (sim.intercityTimer <= 0) {
+    dispatchIntercityTransfer()
+    // Keep retrying quickly until a source and destination across the network are available.
+    sim.intercityTimer = range(2, 3)
+  }
 }
 
 // ───────────────────────────── init
 
-const LOTS = () => `${Math.floor(range(10000, 99999))}-${pick(['A', 'B', 'C'])}${Math.floor(range(1, 9))}`
+const LOTS = () => `${Math.floor(range(10000, 99999))}-${pick(['A', 'B', 'C', 'P1', 'P2', 'P3'])}${Math.floor(range(1, 9))}`
 const DATES = ['Apr 16, 16:29', 'Apr 18, 08:12', 'Apr 19, 11:45', 'Apr 20, 07:03', 'Apr 21, 14:30']
 
 export function initSim() {
@@ -635,8 +827,8 @@ export function initSim() {
     if (free >= 0) spawnArrival(w, free, Math.min(WORLD_HALF, dockX(w, free) + range(50, 110)))
   }
   // some highway traffic already moving
-  for (let i = 0; i < 12; i++) {
-    const lane = i % 4
+  for (let i = 0; i < 18; i++) {
+    const lane = i % 6
     const east = lane % 2 === 0
     spawnTransit(lane)
     const t = sim.trucks[sim.trucks.length - 1]
@@ -644,4 +836,15 @@ export function initSim() {
     t.pos.x = x
     t.path = buildPath(t.pos, [{ x: east ? WORLD_HALF + 20 : -WORLD_HALF - 20, z: t.pos.z }])
   }
+  const pierTestTruck = makeTruck({
+    state: 'transit',
+    pos: { x: -48.5, z: LANE_EAST },
+    heading: Math.PI,
+    speed: 12,
+    cargo: 2,
+    testRoute: 'pier',
+    testDirection: 'AtoB',
+  })
+  pierTestTruck.path = buildPath(pierTestTruck.pos, [{ x: -48.5, z: LANE_EAST - 220 }])
+  sim.trucks.push(pierTestTruck)
 }

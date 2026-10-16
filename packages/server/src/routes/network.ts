@@ -3,7 +3,7 @@ import { simulationStream } from '../websocket/SimulationStream.js';
 import { dsStore } from '../dsStore.js';
 import { DEMO_PORTS } from '../demo/demoNetwork.js';
 import { getDemoNetwork } from '../demo/demoNetwork.js';
-import { getCanonicalPorts } from '../data/portCatalog.js';
+import { getCanonicalPorts, getPortByNodeId } from '../data/portCatalog.js';
 import { getActiveScenario } from '../maritime/activeScenario.js';
 import { getSpecialVessels } from '../maritime/specialVessels.js';
 import { getTradeRegionId, listTradeRegions } from '../maritime/TradeRegions.js';
@@ -28,7 +28,7 @@ export default async function networkRoutes(fastify: FastifyInstance) {
         type: node.type,
         latitude:  node.position.latitude,
         longitude: node.position.longitude,
-        name: portRecord?.name ?? node.portId,
+        name: portRecord?.name ?? getPortByNodeId(id)?.name ?? node.portId,
       });
     }
 

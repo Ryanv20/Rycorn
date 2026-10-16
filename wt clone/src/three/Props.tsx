@@ -132,14 +132,14 @@ export function Trees({ points }: { points: [number, number, number][] }) {
   )
 }
 
-export function ShippingContainer({ color, label, position, rotation = 0 }: { color: string; label: string; position: [number, number, number]; rotation?: number }) {
+export function ShippingContainer({ color, label, position, rotation = 0, scale = 1 }: { color: string; label: string; position: [number, number, number]; rotation?: number; scale?: number }) {
   const m = useMemo(() => {
     const side = new THREE.MeshStandardMaterial({ map: containerSide(color, label), roughness: 0.6 })
     const plain = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
     return [plain, plain, plain, plain, side, side]
   }, [color, label])
   return (
-    <mesh position={[position[0], position[1] + 1.3, position[2]]} rotation={[0, rotation, 0]} material={m} castShadow receiveShadow>
+    <mesh position={[position[0], position[1] + 1.3 * scale, position[2]]} rotation={[0, rotation, 0]} scale={scale} material={m} castShadow receiveShadow>
       <boxGeometry args={[12, 2.6, 2.5]} />
     </mesh>
   )
