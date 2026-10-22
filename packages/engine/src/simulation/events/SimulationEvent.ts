@@ -10,7 +10,9 @@ export type EventType =
   | 'SHIP_AVAILABLE'
   | 'REPOSITION_STARTED'
   | 'REPOSITION_ARRIVED'
-  | 'BUNKERING_COMPLETED';
+  | 'BUNKERING_COMPLETED'
+  | 'CAPTAIN_CONTROL'
+  | 'MARITIME_INCIDENT';
 
 export interface SimulationEvent {
   readonly eventId: string;

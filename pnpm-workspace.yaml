@@ -2,7 +2,7 @@ allowBuilds:
   esbuild: true
 packages:
   - 'packages/*'
-  - 'DS_System'
-  - 'LearnersD'
-  - 'Rycorn-port'
-  - 'new_file'
+  - 'demand-supply-system'
+  - 'learning-app'
+  - 'los-angeles-port-console'
+  - 'ship simulator'

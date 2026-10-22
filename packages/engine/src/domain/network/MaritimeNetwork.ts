@@ -32,9 +32,11 @@ export class MaritimeNetwork {
 
     const visited = new Set<NodeId>([fromId]);
     const queue: NodeId[] = [fromId];
+    let queueHead = 0;
 
-    while (queue.length > 0) {
-      const current = queue.shift()!;
+    // Keep traversal linear: Array.shift() reindexes the remaining queue each time.
+    while (queueHead < queue.length) {
+      const current = queue[queueHead++];
       if (current === toId) return true;
 
       const edges = this.getEdgesFrom(current);

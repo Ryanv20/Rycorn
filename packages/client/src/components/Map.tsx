@@ -6,6 +6,7 @@ import PortMarker from './PortMarker';
 import FleetCanvas from './FleetCanvas';
 import SpecialVesselMarker, { type SpecialVesselRecord } from './SpecialVesselMarker';
 import { API } from '../api';
+import { readPageCache, writePageCache } from '../cache';
 
 const GlobeView = lazy(() => import('./GlobeView'));
 
@@ -32,20 +33,29 @@ interface MapProps {
   followPoint: [number, number] | null;
   onSelectVessel: (vesselId: string) => void;
   onFollowNode: (point: [number, number]) => void;
+  onOpenPortConsole: () => void;
+  onOpenLekkiPortConsole: () => void;
   simulationTimeHours: number;
   simulationRunning: boolean;
   clockProfileId?: string;
+  constructViewer: boolean;
+  onToggleConstructViewer: () => void;
 }
 
-function FitNetwork({ nodes }: { nodes: any[] }) {
+function FitNetwork({ nodes, ports }: { nodes: any[]; ports: any[] }) {
   const map = useMap();
 
   useEffect(() => {
-    const ports = nodes.filter(node => node.type === 'PORT');
-    if (ports.length > 0) {
-      map.fitBounds(new LatLngBounds(ports.map(port => [port.latitude, port.longitude])), { padding: [42, 42], maxZoom: 7 });
+    const networkPorts = nodes.filter(node => node.type === 'PORT');
+    const losAngeles = ports.find(port => port.portId === '19WPI-16080');
+    const locations = networkPorts.map(port => [port.latitude, port.longitude] as [number, number]);
+    if (losAngeles && !networkPorts.some(port => port.id === 'node-19WPI-16080')) {
+      locations.push([losAngeles.latitude, losAngeles.longitude]);
     }
-  }, [map, nodes]);
+    if (locations.length > 0) {
+      map.fitBounds(new LatLngBounds(locations), { padding: [42, 42], maxZoom: 7 });
+    }
+  }, [map, nodes, ports]);
 
   return null;
 }
@@ -61,9 +71,15 @@ function routeGeometryKey(coordinates: [number, number][]): string {
   return forward < reverse ? forward : reverse;
 }
 
-export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVessels, showPorts, showRoutes, showSpecial, showShips, showBunkers, showTraffic, showNodeLabels, routesOnly, projection, cameraFollow, selectedVesselId, followPoint, onSelectVessel, onFollowNode, simulationTimeHours, simulationRunning, clockProfileId }: MapProps) {
-  const [nodes, setNodes] = useState<any[]>([]);
-  const [bunkerSpots, setBunkerSpots] = useState<any[]>([]);
+export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVessels, showPorts, showRoutes, showSpecial, showShips, showBunkers, showTraffic, showNodeLabels, routesOnly, projection, cameraFollow, selectedVesselId, followPoint, onSelectVessel, onFollowNode, onOpenPortConsole, onOpenLekkiPortConsole, simulationTimeHours, simulationRunning, clockProfileId, constructViewer, onToggleConstructViewer }: MapProps) {
+  const [nodes, setNodes] = useState<any[]>(() => {
+    const cached = readPageCache<any[]>('network-nodes', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [bunkerSpots, setBunkerSpots] = useState<any[]>(() => {
+    const cached = readPageCache<any[]>('bunker-spots', []);
+    return Array.isArray(cached) ? cached : [];
+  });
   const nodeById = useMemo(() => new globalThis.Map(nodes.map(node => [node.id, node])), [nodes]);
   const tradeLaneRoutes = useMemo(() => {
     const seen = new Set<string>();
@@ -80,6 +96,7 @@ export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVes
     .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.startsWith('node-19WPI-'))
     .map(nodeId => nodeId.slice('node-'.length))))].sort().join('|');
   const visiblePortIds = useMemo(() => new Set([
+    '19WPI-16080',
     ...tradeLaneRoutes.flatMap(route => [route.originPortId, route.destinationPortId].filter((portId): portId is string => Boolean(portId))),
     ...demandPortKey.split('|').filter(Boolean),
     ...fleetPortKey.split('|').filter(Boolean).map(nodeId => nodeId.slice('node-'.length)),
@@ -116,16 +133,16 @@ export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVes
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/network/nodes`).then(response => response.json()),
-      fetch(`${API}/network/bunker-spots`).then(response => response.json()),
+      fetch(`${API}/network/nodes`).then(response => { if (!response.ok) throw new Error('Network nodes unavailable'); return response.json(); }),
+      fetch(`${API}/network/bunker-spots`).then(response => { if (!response.ok) throw new Error('Bunker locations unavailable'); return response.json(); }),
     ]).then(([nextNodes, nextBunkerSpots]) => {
-      setNodes(nextNodes);
-      setBunkerSpots(nextBunkerSpots);
-    }).catch(() => {
-      setNodes([]);
-      setBunkerSpots([]);
-    });
+      if (Array.isArray(nextNodes)) setNodes(nextNodes);
+      if (Array.isArray(nextBunkerSpots)) setBunkerSpots(nextBunkerSpots);
+    }).catch(() => { /* Keep the last usable map layers while the API is offline. */ });
   }, [plannedRoutes]);
+
+  useEffect(() => writePageCache('network-nodes', nodes), [nodes]);
+  useEffect(() => writePageCache('bunker-spots', bunkerSpots), [bunkerSpots]);
 
   if (projection === 'globe') {
     return <Suspense fallback={<div className="globe-loading" role="status">Loading global view…</div>}>
@@ -141,6 +158,8 @@ export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVes
         simulationTimeHours={simulationTimeHours}
         simulationRunning={simulationRunning}
         clockProfileId={clockProfileId}
+        constructViewer={constructViewer}
+        onToggleConstructViewer={onToggleConstructViewer}
       />
     </Suspense>;
   }
@@ -153,7 +172,7 @@ export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVes
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <ZoomControl position="bottomright" />
-      <FitNetwork nodes={nodes} />
+      <FitNetwork nodes={nodes} ports={visiblePorts} />
       <FleetCanvas vessels={vessels} nodes={nodes} simulationTimeHours={simulationTimeHours} simulationRunning={simulationRunning} clockProfileId={clockProfileId} selectedVesselId={selectedVesselId} cameraFollow={cameraFollow} followPoint={followPoint} onSelectVessel={onSelectVessel} showShips={showShips} />
       <div className={`map-symbol-legend ${routesOnly ? 'route-atlas-legend' : ''}`} aria-label={routesOnly ? 'Route traffic legend' : 'Map symbols'}>
         {routesOnly ? <><span><i className="route-legend-active" /> Active</span><span><i className="route-legend-inactive" /> Inactive</span><span><i className="route-legend-high" /> High traffic · 3+ ships</span></> : <>
@@ -162,7 +181,7 @@ export default function Map({ vessels, cargoes, ports, plannedRoutes, specialVes
         </>}
       </div>
       {showPorts && visiblePorts.map(port => (
-        <PortMarker key={port.portId} port={{ ...port, id: `node-${port.portId}`, position: { latitude: port.latitude, longitude: port.longitude } }} showLabel={showNodeLabels} onFollow={() => onFollowNode([port.latitude, port.longitude])} />
+        <PortMarker key={port.portId} port={{ ...port, id: `node-${port.portId}`, position: { latitude: port.latitude, longitude: port.longitude } }} showLabel={showNodeLabels} onFollow={() => onFollowNode([port.latitude, port.longitude])} onOpenPortConsole={port.portId === '19WPI-16080' ? onOpenPortConsole : undefined} onOpenLekkiPortConsole={port.portId === '19WPI-46135-LEKKI-6-42320-4-00824' ? onOpenLekkiPortConsole : undefined} />
       ))}
       {showBunkers && !routesOnly && bunkerSpots.map(spot => <Marker
         key={`bunker-${spot.portId}`}

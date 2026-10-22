@@ -1,4 +1,4 @@
-import { Activity, Anchor, ChevronLeft, ChevronRight, CircleDot, Clock3, Compass, GitFork, Map as MapIcon, Navigation, Package, Ship, Shield, TriangleAlert } from 'lucide-react';
+import { Activity, Anchor, Boxes, ChevronLeft, ChevronRight, CircleDot, Clock3, Compass, GitFork, Map as MapIcon, Navigation, Package, Ship, Shield, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import EventLog from './EventLog';
 import Clock from './Clock';
@@ -46,7 +46,7 @@ interface OperationsRailProps {
   onToggleClock: () => void;
   currentView: 'map' | 'routes' | 'fleet' | 'shipments' | 'activity';
   onSelectView: (view: 'map' | 'routes' | 'fleet' | 'shipments' | 'activity') => void;
-  onOpenTool: (page: '/next-stop' | '/clock' | '/special-class' | '/ds-graph') => void;
+  onOpenTool: (page: '/next-stop' | '/clock' | '/special-class' | '/ds-graph' | '/assets') => void;
   onOpenDs: () => void;
   hideRecentActivity?: boolean;
 }
@@ -89,6 +89,8 @@ export default function OperationsRail({ vessels, cargoes, events, ports, errors
         <button onClick={() => onOpenDs()}><Anchor size={15} /><span>Demand &amp; supply</span></button>
         <button onClick={() => onOpenTool('/ds-graph')}><GitFork size={15} /><span>DS flow graph</span></button>
         <button onClick={() => onOpenTool('/special-class')}><Shield size={15} /><span>Special fleet</span></button>
+        <p className="eyebrow rail-tools-label">LIBRARY</p>
+        <button onClick={() => onOpenTool('/assets')}><Boxes size={15} /><span>Asset catalog</span></button>
       </nav>
       {clockVisible && <Clock simulationTime={simulationTime} timeMetadata={timeMetadata} running={running} profileId={clockProfileId} />}
       {routesMode && <div className="route-rail-metrics"><div><span>TRADE LANES</span><strong>{routeCount.toString().padStart(2, '0')}</strong></div><div><span>CONNECTED REGIONS</span><strong>{regionCount.toString().padStart(2, '0')}</strong></div><small>Modeled sea corridors · select a vessel to inspect its active passage</small></div>}

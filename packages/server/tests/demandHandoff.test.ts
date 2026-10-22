@@ -35,15 +35,15 @@ test('simulation initialization loads DS demands when no cargo override is suppl
   for (let step = 0; step < 5000; step += 1) {
     const event = simulationStream.step();
     const cargoes = Array.from(simulationStream.getStatus()?.cargoes.values() ?? []);
-    if (!event || cargoes.length === 11 && cargoes.every(cargo => cargo.status === 'DELIVERED')) break;
+    if (!event || cargoes.length === 2 && cargoes.every(cargo => cargo.status === 'DELIVERED')) break;
   }
   const finalStatusResponse = await app.inject({ method: 'GET', url: '/simulation/status' });
   const finalStatus = finalStatusResponse.json() as { cargoes: Array<{ status: string }> };
-  assert.equal(finalStatus.cargoes.length, 11);
+  assert.equal(finalStatus.cargoes.length, 2);
   assert.ok(finalStatus.cargoes.every(cargo => cargo.status === 'DELIVERED'), JSON.stringify(finalStatus.cargoes));
-  const scenarioStatuses = dsStore.getCargoDemands().filter(demand => demand.requestId.startsWith('NEXT-STOP-'));
-  assert.ok(scenarioStatuses.every(demand => demand.status === 'DELIVERED'), JSON.stringify(scenarioStatuses.map(demand => ({ id: demand.requestId, status: demand.status }))));
-  assert.equal(dsStore.getCargoDemands().find(demand => demand.requestId === 'ORDER-LIVE-001')?.status, 'DELIVERED');
+  const scenarioStatuses = dsStore.getCargoDemands().filter(demand => demand.requestId.startsWith('TEST-LEKKI-LA-'));
+  assert.ok(scenarioStatuses.every(demand => demand.status === 'DELIVERED' || demand.status === 'DELIVERED_LATE'), JSON.stringify(scenarioStatuses.map(demand => ({ id: demand.requestId, status: demand.status }))));
+  assert.ok(['DELIVERED', 'DELIVERED_LATE'].includes(dsStore.getCargoDemands().find(demand => demand.requestId === 'ORDER-LIVE-001')?.status ?? ''));
 
   const reportResponse = await app.inject({ method: 'GET', url: '/simulation/report' });
   const report = reportResponse.json() as {
@@ -51,7 +51,7 @@ test('simulation initialization loads DS demands when no cargo override is suppl
     timeSources: { simulationTime: string; observedAtUtc: string; distanceKm: string };
   };
   const liveShipment = report.shipments.find(shipment => shipment.requestId === 'ORDER-LIVE-001');
-  assert.equal(liveShipment?.status, 'DELIVERED');
+  assert.ok(liveShipment?.status === 'DELIVERED' || liveShipment?.status === 'DELIVERED_LATE');
   assert.ok((liveShipment?.distanceKm ?? 0) > 0);
   assert.ok((liveShipment?.routeNodeIds?.length ?? 0) > 1);
   assert.match(report.timeSources.observedAtUtc, /Date\.now/);

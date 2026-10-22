@@ -68,7 +68,7 @@ export class NetworkBuilder {
     const edgeId = `edge-${from}-${to}` as EdgeId;
     
     if (this.edges.has(edgeId)) {
-        return; // skip duplicate
+      throw new Error(`Duplicate edge ID ${edgeId}; network definitions must not silently overwrite or skip edges`);
     }
     
     const edge: NetworkEdge = {

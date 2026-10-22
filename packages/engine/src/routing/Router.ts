@@ -24,6 +24,46 @@ export interface RouterOptions {
   vesselCapability: VesselCapability;
 }
 
+/** Minimal binary min-heap for Dijkstra's frontier. */
+class MinPriorityQueue<T> {
+  private items: Array<{ value: T; priority: number }> = [];
+
+  get size(): number { return this.items.length; }
+
+  push(value: T, priority: number): void {
+    const item = { value, priority };
+    this.items.push(item);
+    let index = this.items.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (this.items[parent].priority <= priority) break;
+      this.items[index] = this.items[parent];
+      index = parent;
+    }
+    this.items[index] = item;
+  }
+
+  pop(): { value: T; priority: number } | undefined {
+    if (this.items.length === 0) return undefined;
+    const first = this.items[0];
+    const last = this.items.pop()!;
+    if (this.items.length > 0) {
+      let index = 0;
+      while (true) {
+        const left = index * 2 + 1;
+        const right = left + 1;
+        if (left >= this.items.length) break;
+        const child = right < this.items.length && this.items[right].priority < this.items[left].priority ? right : left;
+        if (this.items[child].priority >= last.priority) break;
+        this.items[index] = this.items[child];
+        index = child;
+      }
+      this.items[index] = last;
+    }
+    return first;
+  }
+}
+
 export class Router {
   constructor(private network: MaritimeNetwork) {}
   
@@ -44,34 +84,22 @@ export class Router {
     const dist = new Map<NodeId, number>();
     const prev = new Map<NodeId, NodeId>();
     const prevEdge = new Map<NodeId, EdgeId>();
-    const unvisited = new Set<NodeId>();
-
     for (const nodeId of this.network.nodes.keys()) {
       dist.set(nodeId, Infinity);
-      unvisited.add(nodeId);
     }
     dist.set(origin, 0);
+    const frontier = new MinPriorityQueue<NodeId>();
+    frontier.push(origin, 0);
 
-    while (unvisited.size > 0) {
-      let current: NodeId | null = null;
-      let minDist = Infinity;
-      for (const nodeId of unvisited) {
-        const d = dist.get(nodeId)!;
-        if (d < minDist) {
-          minDist = d;
-          current = nodeId;
-        }
-      }
-
-      if (current === null || minDist === Infinity) {
-        break; // no more reachable nodes
-      }
+    while (frontier.size > 0) {
+      const entry = frontier.pop()!;
+      const current = entry.value;
+      const minDist = entry.priority;
+      if (minDist !== dist.get(current)) continue; // Ignore stale entries after a shorter path is found.
 
       if (current === destination) {
         break; // reached target
       }
-
-      unvisited.delete(current);
 
       const edges = this.network.getEdgesFrom(current);
       for (const edge of edges) {
@@ -80,13 +108,12 @@ export class Router {
         }
 
         const neighbor = edge.toNodeId;
-        if (!unvisited.has(neighbor)) continue;
-
-        const alt = dist.get(current)! + edge.distanceKm;
+        const alt = minDist + edge.distanceKm;
         if (alt < dist.get(neighbor)!) {
           dist.set(neighbor, alt);
           prev.set(neighbor, current);
           prevEdge.set(neighbor, edge.id);
+          frontier.push(neighbor, alt);
         }
       }
     }

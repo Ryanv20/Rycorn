@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useId, useMemo, useState } from 'react';
 import { API } from '../api';
+import { readPageCache, writePageCache } from '../cache';
 
 type Demand = {
   requestId: string;
@@ -22,6 +23,7 @@ type Vessel = { id: string; capability: string; startNodeId: string; deadweightT
 type TradeCycle = { cycleNumber: number; demandCount: number; deliveredCount: number; lateCount: number; failedCount: number; outstandingCount: number; modelUnits: number };
 type Status = { demandProvider: string; fleetProvider: string; demandCount: number; vesselCount: number; latestSnapshot: Snapshot | null; continuousMode?: boolean; continuousCycle?: number; tradeCycles?: TradeCycle[]; environment?: { enabled: boolean } | null };
 type Snapshot = { snapshotId: string; createdAt: string; version: number; cargoDemands: Demand[]; vesselSupply: Vessel[] };
+type DSPageCache = { status: Status | null; demands: Demand[]; vessels: Vessel[]; ports: Port[]; regions: TradeRegion[]; snapshot: Snapshot | null };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
@@ -92,16 +94,19 @@ function statusLabel(status: string): string {
 }
 
 export default function DSSystemPage({ onBack }: { onBack: () => void }) {
+  const [cached] = useState<DSPageCache>(() => readPageCache<DSPageCache>('ds-system', { status: null, demands: [], vessels: [], ports: [], regions: [], snapshot: null }));
   const [error, setError] = useState('');
-  const [status, setStatus] = useState<Status | null>(null);
-  const [demands, setDemands] = useState<Demand[]>([]);
-  const [vessels, setVessels] = useState<Vessel[]>([]);
-  const [ports, setPorts] = useState<Port[]>([]);
-  const [regions, setRegions] = useState<TradeRegion[]>([]);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [status, setStatus] = useState<Status | null>(cached.status);
+  const [demands, setDemands] = useState<Demand[]>(Array.isArray(cached.demands) ? cached.demands : []);
+  const [vessels, setVessels] = useState<Vessel[]>(Array.isArray(cached.vessels) ? cached.vessels : []);
+  const [ports, setPorts] = useState<Port[]>(Array.isArray(cached.ports) ? cached.ports : []);
+  const [regions, setRegions] = useState<TradeRegion[]>(Array.isArray(cached.regions) ? cached.regions : []);
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(cached.snapshot);
   const [editingDemandId, setEditingDemandId] = useState<string | null>(null);
   const [demandForm, setDemandForm] = useState({ origin: '', destination: '', quantity: '100', deadlineDays: '7', cargoType: 'GENERAL' });
   const [vesselForm, setVesselForm] = useState({ id: '', capability: 'C', startNodeId: '', deadweightTonnes: '12000' });
+
+  useEffect(() => writePageCache('ds-system', { status, demands, vessels, ports, regions, snapshot }), [status, demands, vessels, ports, regions, snapshot]);
 
   const loadData = async () => {
     try {

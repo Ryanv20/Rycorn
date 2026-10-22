@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Anchor, ArrowLeft, Boxes, CircleDollarSign, GitFork, Package, Ship } from 'lucide-react';
 import { API } from '../api';
+import { readPageCache, writePageCache } from '../cache';
 
 interface Region { id: string; name: string; portCount: number; samplePorts?: Array<{ portId: string; name: string; country: string }>; }
 interface Demand { requestId: string; originRegionId?: string; destinationRegionId?: string; quantity: number; status: string; origin: string; destination: string; }
 interface Vessel { id: string; capability: string; deadweightTonnes?: number; startNodeId: string; }
 
 export default function DSGraphPage({ onBack }: { onBack: () => void }) {
-  const [regions, setRegions] = useState<Region[]>([]);
-  const [demands, setDemands] = useState<Demand[]>([]);
-  const [vessels, setVessels] = useState<Vessel[]>([]);
+  const [regions, setRegions] = useState<Region[]>(() => {
+    const cached = readPageCache<Region[]>('ds-regions', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [demands, setDemands] = useState<Demand[]>(() => {
+    const cached = readPageCache<Demand[]>('ds-demands', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [vessels, setVessels] = useState<Vessel[]>(() => {
+    const cached = readPageCache<Vessel[]>('ds-vessels', []);
+    return Array.isArray(cached) ? cached : [];
+  });
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [error, setError] = useState('');
+
+  useEffect(() => writePageCache('ds-regions', regions), [regions]);
+  useEffect(() => writePageCache('ds-demands', demands), [demands]);
+  useEffect(() => writePageCache('ds-vessels', vessels), [vessels]);
 
   useEffect(() => {
     let active = true;

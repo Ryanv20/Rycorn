@@ -10,7 +10,11 @@ From the repository root:
 ./Rycorn
 ```
 
-The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server, network client, Los Angeles port console, and Waretrack together. Open any URL printed by the launcher. The launcher selects available ports (3000, 5173, 5176, and 5177 by default); set `RYCORN_API_PORT`, `RYCORN_CLIENT_PORT`, `RYCORN_PORT_CONSOLE_PORT`, or `RYCORN_WARETRACK_PORT` to choose a starting port. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
+The launcher checks that the port catalog and coastline files are present, prepares dependencies from the local pnpm cache, then starts the API/WebSocket server, network client, Lekki port console, and Los Angeles port console together. Open any URL printed by the launcher. The launcher selects available ports (3000, 5173, 5174, and 5176 by default); set `RYCORN_API_PORT`, `RYCORN_CLIENT_PORT`, `RYCORN_LEKKI_CONSOLE_PORT`, or `RYCORN_PORT_CONSOLE_PORT` to choose a starting port. For a phone on the same Wi-Fi, use one of the LAN URLs printed by the launcher. You can also start it with `pnpm rycorn`. The DS console is available from **DS System** or at `/DS_system` and has no login prompt. Unrecognized page URLs show a 404 screen with a link back to the map.
+
+The Lekki port console at port 5174 is the 3D port scene in `lekki-port-console`; it reads Rycorn's Lekki port reference, DS vessel supply, pending requests, and engine clock, and provides initialize/run/pause controls. The separate Los Angeles port console reads the same Rycorn API, simulation clock, vessel states, and cargo requests as the map. Open it from the Los Angeles marker popup on the map. **Captain** opens the Ship Simulator (port 5178), a bridge view over the shared fleet with vessel position/bearing, helm controls, and incident drills that update Rycon ETAs and DS delivery outcomes. The clock contract and the difference between modeled time and real observation time are explained in [time.md](time.md).
+
+The default run is the single-vessel **Lekki → Los Angeles Direct Test**. In the Los Angeles console, **City 4 · WT** shows Rycorn DS requests that touch Los Angeles and opens the corresponding City 4 cross-dock scene in the Lekki port console.
 
 ## Tests
 
@@ -24,7 +28,7 @@ Run the deterministic engine demo with `pnpm demo`.
 
 ## System boundaries
 
-- `DS_System/` owns demand/supply contracts, validation, request lifecycle, and planning snapshots. Pending demand can be edited or withdrawn; Rycon reports assignment, transit, on-time or late delivery, and failures back to DS.
+- `demand-supply-system/` owns demand/supply contracts, validation, request lifecycle, and planning snapshots. Pending demand can be edited or withdrawn; Rycon reports assignment, transit, on-time or late delivery, and failures back to DS.
 - `packages/engine/` owns compatible routing, movement calculation, vessel/cargo states, vessel repositioning, and the discrete-event queue.
 - `packages/server/` builds and land-screens route networks, joins DS records to the engine, runs regional trade cycles, streams state, and assembles reports.
 - `packages/client/` contains the map, route atlas, fleet and shipment views, economist-oriented planning workspace, scenario planner, and live report panel.
@@ -55,6 +59,7 @@ Useful read endpoints include `GET /network/regions`, `GET /network/routes`, and
 - The global loop is a synthetic economic network over named WPI ports. It is not a measured global trade matrix, live booking feed, AIS reconstruction, or forecast. Region groupings are approximate planning categories, not official customs or economic blocs.
 - Network connector paths make modeled ports reachable for routing and repositioning. They are generalized sea routes; canal restrictions, traffic separation schemes, port closures, and navigational notices are not modeled.
 - Movement remains deterministic under its configured seed and simplified. Vessel speeds, weather and congestion sensitivities, handling times, and delays still need calibration from sourced operational data.
+- Ship Simulator positions are interpolated along Rycon's modeled routes, not live AIS positions. Helm settings and incident drills adjust modeled bearings/ETAs and therefore DS delivery outcomes; they do not control real vessels.
 - Continuous runs keep recent cycle records and a bounded event/time history so long runs do not grow memory without limit. Shipment detail in operational reports covers retained history.
 - Wall-clock observations are deliberately separate from simulation scheduling. A modeled calendar anchor can be added later without changing this distinction.
 - Map zoom, marker scale, and label density are presentation settings; they do not change physical distances or simulation time.
@@ -62,9 +67,10 @@ Useful read endpoints include `GET /network/regions`, `GET /network/routes`, and
 ## Workspace
 
 ```text
-DS_System/         demand/supply contracts, store, and tests
+demand-supply-system/         demand/supply contracts, store, and tests
 packages/engine/   network, routing, movement, and simulation engine
 packages/server/   API, WebSocket stream, and report assembly
 packages/client/   responsive maritime operations interface
+ship simulator/   captain's bridge for the shared modeled fleet
 data/raw/          immutable inputs and provenance notes
 ```

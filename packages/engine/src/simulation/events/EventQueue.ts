@@ -37,4 +37,18 @@ export class EventQueue {
   remove(eventType: EventType, entityId: string): void {
     this.events = this.events.filter(event => event.eventType !== eventType || event.entityId !== entityId);
   }
+
+  adjustTime(eventType: EventType, entityId: string, deltaHours: number, minimumTime: number): SimulationEvent | undefined {
+    const index = this.events.findIndex(event => event.eventType === eventType && event.entityId === entityId);
+    if (index < 0) return undefined;
+    const event = this.events[index];
+    const simulationTime = Math.max(minimumTime, event.simulationTime + deltaHours);
+    const adjusted = { ...event, simulationTime };
+    this.events[index] = adjusted;
+    this.events.sort((a, b) => {
+      if (a.simulationTime !== b.simulationTime) return a.simulationTime - b.simulationTime;
+      return a.eventType.localeCompare(b.eventType);
+    });
+    return adjusted;
+  }
 }

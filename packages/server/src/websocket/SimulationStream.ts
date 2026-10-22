@@ -1,4 +1,4 @@
-import { SimulationEngine, VesselCapability, type CargoDefinition, type EnvironmentConfig, type SimulationInput } from '@rycon/engine';
+import { SimulationEngine, VesselCapability, type CargoDefinition, type EnvironmentConfig, type SimulationEvent, type SimulationInput } from '@rycon/engine';
 import type { CargoDemand, DemandStatus, VesselSupply } from '@rycon/ds-system';
 import { getDemoNetwork, DEMO_VESSELS, DEMO_CARGOES } from '../demo/demoNetwork.js';
 import { dsStore } from '../dsStore.js';
@@ -21,6 +21,8 @@ export interface SystemStatus {
   totalEventsProcessed: number;
   startedAt:         number | null;
   uptime:            number;
+  simulationTimeHours: number;
+  simulationTimeSource: 'engine-event-queue';
   clockProfileId:    ClockProfileId;
   continuousMode: boolean;
   continuousCycle:   number;
@@ -47,6 +49,19 @@ export interface TimeMetadata {
   observedAtUtc: string;
   observedAtEpochMs: number;
   observedAtSource: 'server-host-system-clock';
+}
+
+export interface CaptainControl {
+  vesselId: string;
+  rudder: number;
+  throttle: number;
+}
+
+export interface CaptainEvent extends SimulationEvent {
+  eventType: 'CAPTAIN_CONTROL' | 'MARITIME_INCIDENT';
+  locationNodeId: string;
+  observedAtUtc: string;
+  summary: string;
 }
 
 export type ClockProfileId = 'REAL_TIME' | 'HOUR_PER_SECOND' | 'DAY_PER_MINUTE' | 'FAST_REVIEW' | 'MINUTE_PER_SECOND' | 'SIX_HOURS_PER_SECOND' | 'WEEK_PER_SECOND';
@@ -91,6 +106,12 @@ export class SimulationStream {
   private currentCycleStartedAt = 0;
   private tradeCycleSummaries: TradeCycleSummary[] = [];
   private environmentProfile: EnvironmentConfig | null = null;
+  private captainControls = new Map<string, CaptainControl>();
+  private captainEvents: CaptainEvent[] = [];
+  private captainEventCounter = 0;
+  private voyageBaseEta = new Map<string, number>();
+  private controlDelayHours = new Map<string, number>();
+  private incidentDelayHours = new Map<string, number>();
 
   // ── Connection management ──────────────────────────────────────────────
   addConnection(conn: WebSocketConnection): void {
@@ -106,7 +127,7 @@ export class SimulationStream {
         type: 'STATE_UPDATE',
         vessels: Array.from(state.vessels.values()),
         cargoes: Array.from(state.cargoes.values()),
-        simulationTime: state.simulationTime,
+        simulationTime: this.engine?.getCurrentSimulationTime() ?? 0,
       });
       this.sendTo(conn, { type: 'EVENT_HISTORY', events: this.getEvents() });
     }
@@ -132,6 +153,12 @@ export class SimulationStream {
     this.currentCycleDemands = [];
     this.tradeCycleSummaries = [];
     this.environmentProfile = input?.config?.environment ?? null;
+    this.captainControls.clear();
+    this.captainEvents = [];
+    this.captainEventCounter = 0;
+    this.voyageBaseEta.clear();
+    this.controlDelayHours.clear();
+    this.incidentDelayHours.clear();
 
     // Always use the server-built network — never trust a network from the client
     this.engine.initialize({
@@ -213,6 +240,12 @@ export class SimulationStream {
       throw error;
     }
     if (event) {
+      if (event.eventType === 'DEPARTED') this.applyCaptainImpact(event.entityId);
+      if (event.eventType === 'ARRIVED' || event.eventType === 'REPOSITION_ARRIVED') {
+        this.voyageBaseEta.delete(event.entityId);
+        this.controlDelayHours.delete(event.entityId);
+        this.incidentDelayHours.delete(event.entityId);
+      }
       this.updateDemandStatus(event);
       this.eventsProcessed++;
       const timeMetadata = this.createTimeMetadata(event.simulationTime, event.eventId);
@@ -241,6 +274,12 @@ export class SimulationStream {
     this.currentCycleStartedAt = 0;
     this.tradeCycleSummaries = [];
     this.environmentProfile = null;
+    this.captainControls.clear();
+    this.captainEvents = [];
+    this.captainEventCounter = 0;
+    this.voyageBaseEta.clear();
+    this.controlDelayHours.clear();
+    this.incidentDelayHours.clear();
     this.broadcast({ type: 'ADMIN', payload: this.getSystemStatus() });
   }
 
@@ -279,7 +318,56 @@ export class SimulationStream {
   }
 
   getEvents() {
-    return this.engine?.getEvents() ?? [];
+    return [...(this.engine?.getEvents() ?? []), ...this.captainEvents]
+      .sort((a, b) => a.simulationTime - b.simulationTime);
+  }
+
+  getCaptainControls(): CaptainControl[] {
+    const vesselIds = this.engine ? [...this.engine.getState().vessels.keys()] : [];
+    return vesselIds.map(vesselId => this.captainControls.get(vesselId) ?? { vesselId, rudder: 0, throttle: 60 });
+  }
+
+  getCaptainEvents(): CaptainEvent[] {
+    return [...this.captainEvents];
+  }
+
+  applyCaptainControl(vesselId: string, rudder: number, throttle: number): CaptainControl {
+    if (!this.engine) throw new Error('Initialize the simulation before taking the helm');
+    if (!Number.isFinite(rudder) || !Number.isFinite(throttle)) throw new Error('Helm and engine settings must be numeric');
+    const vessel = this.engine.getState().vessels.get(vesselId);
+    if (!vessel) throw new Error(`Vessel ${vesselId} was not found in the active fleet`);
+    const control = {
+      vesselId,
+      rudder: Math.max(-35, Math.min(35, Math.round(rudder))),
+      throttle: Math.max(-40, Math.min(100, Math.round(throttle))),
+    };
+    this.captainControls.set(vesselId, control);
+    if (vessel.status === 'SAILING' || vessel.status === 'REPOSITIONING') this.applyCaptainImpact(vesselId);
+    this.recordCaptainEvent('CAPTAIN_CONTROL', vesselId, 'Captain adjusted helm and engine.', {
+      rudder: control.rudder,
+      throttle: control.throttle,
+      cargoIds: [...vessel.assignedCargoIds],
+    });
+    this.broadcastStateUpdate(this.engine.getCurrentSimulationTime());
+    return control;
+  }
+
+  reportMaritimeIncident(vesselId: string, incident: string, delayHours: number): CaptainEvent {
+    if (!this.engine) throw new Error('Initialize the simulation before reporting an incident');
+    const vessel = this.engine.getState().vessels.get(vesselId);
+    if (!vessel) throw new Error(`Vessel ${vesselId} was not found in the active fleet`);
+    if (vessel.status !== 'SAILING' && vessel.status !== 'REPOSITIONING') throw new Error('Incidents can only affect a vessel that is underway');
+    if (!Number.isFinite(delayHours) || delayHours <= 0 || delayHours > 168) throw new Error('Incident delay must be between 0 and 168 hours');
+    const delay = Math.round(delayHours * 10) / 10;
+    const arrivalAt = this.engine.adjustVesselArrival(vesselId, delay);
+    this.incidentDelayHours.set(vesselId, (this.incidentDelayHours.get(vesselId) ?? 0) + delay);
+    const event = this.recordCaptainEvent('MARITIME_INCIDENT', vesselId, incident, {
+      delayHours: delay,
+      revisedArrivalAt: arrivalAt,
+      cargoIds: [...vessel.assignedCargoIds],
+    });
+    this.broadcastStateUpdate(this.engine.getCurrentSimulationTime());
+    return event;
   }
 
   getTimeObservations(): TimeMetadata[] {
@@ -302,6 +390,8 @@ export class SimulationStream {
       totalEventsProcessed: this.eventsProcessed,
       startedAt:            this.startedAt,
       uptime:               this.startedAt ? Date.now() - this.startedAt : 0,
+      simulationTimeHours:  this.engine?.getCurrentSimulationTime() ?? 0,
+      simulationTimeSource: 'engine-event-queue',
       clockProfileId:       this.clockProfileId,
       continuousMode:       this.continuousTemplate.length > 0,
       continuousCycle:      this.continuousCycle,
@@ -336,6 +426,47 @@ export class SimulationStream {
       simulationTime: clockTime,
       timeMetadata: currentTimeMetadata,
     });
+  }
+
+  private applyCaptainImpact(vesselId: string): void {
+    if (!this.engine) return;
+    const vessel = this.engine.getState().vessels.get(vesselId);
+    if (!vessel?.expectedArrivalAt || (vessel.status !== 'SAILING' && vessel.status !== 'REPOSITIONING')) return;
+    const currentTime = this.engine.getCurrentSimulationTime();
+    const baseEta = this.voyageBaseEta.get(vesselId) ?? vessel.baseExpectedArrivalAt ?? (vessel.expectedArrivalAt
+      - (this.controlDelayHours.get(vesselId) ?? 0)
+      - (this.incidentDelayHours.get(vesselId) ?? 0));
+    this.voyageBaseEta.set(vesselId, baseEta);
+    const control = this.captainControls.get(vesselId) ?? { vesselId, rudder: 0, throttle: 60 };
+    const remainingHours = Math.max(0, baseEta - currentTime);
+    const throttlePenalty = Math.max(0, 50 - control.throttle) / 200;
+    const steeringPenalty = Math.abs(control.rudder) / 35 * 0.12;
+    const nextControlDelay = Math.min(remainingHours * 0.5, remainingHours * (throttlePenalty + steeringPenalty));
+    const previousControlDelay = this.controlDelayHours.get(vesselId) ?? 0;
+    const delta = nextControlDelay - previousControlDelay;
+    if (Math.abs(delta) > 0.001) this.engine.adjustVesselArrival(vesselId, delta);
+    this.controlDelayHours.set(vesselId, nextControlDelay);
+  }
+
+  private recordCaptainEvent(eventType: CaptainEvent['eventType'], vesselId: string, summary: string, metadata: Record<string, unknown>): CaptainEvent {
+    const event: CaptainEvent = {
+      eventId: `captain-${++this.captainEventCounter}`,
+      eventType,
+      entityId: vesselId,
+      simulationTime: this.engine?.getCurrentSimulationTime() ?? 0,
+      locationNodeId: this.engine?.getState().vessels.get(vesselId)?.currentNodeId ?? 'at-sea',
+      observedAtUtc: new Date().toISOString(),
+      summary,
+      metadata,
+    };
+    this.captainEvents.push(event);
+    if (this.captainEvents.length > 500) this.captainEvents.splice(0, this.captainEvents.length - 500);
+    const timeMetadata = this.createTimeMetadata(event.simulationTime, event.eventId);
+    this.timeObservations.push(timeMetadata);
+    if (this.timeObservations.length > 5000) this.timeObservations.splice(0, this.timeObservations.length - 5000);
+    this.broadcast({ type: 'CAPTAIN_EVENT', event });
+    this.broadcast({ type: 'SIMULATION_EVENT', event, timestamp: timeMetadata.observedAtEpochMs, timeMetadata });
+    return event;
   }
 
   private recordError(message: string): void {
@@ -500,5 +631,3 @@ export class SimulationStream {
 // Singleton
 export const simulationStream = new SimulationStream();
 
-// Type re-export so routes can import it
-type SimulationEvent = ReturnType<SimulationStream['step']>;

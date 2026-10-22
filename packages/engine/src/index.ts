@@ -2,6 +2,7 @@ export { SimulationEngine, type SimulationInput, type SimulationResult, type Ves
 export { NetworkBuilder } from './network/NetworkBuilder.js';
 export { VesselCapability } from './domain/network/VesselCapability.js';
 export * from './domain/network/MaritimeNetwork.js';
+export type { NodeId, NodeType, GeographicNode } from './domain/nodes/GeographicNode.js';
 export * from './domain/network/NetworkEdge.js';
 export * from './domain/network/NetworkNode.js';
 export * from './domain/ports/CanonicalPort.js';

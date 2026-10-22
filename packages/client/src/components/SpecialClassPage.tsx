@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Crosshair, Shield, Ship } from 'lucide-react';
 import type { SpecialVesselRecord } from './SpecialVesselMarker';
 import { API } from '../api';
+import { readPageCache, writePageCache } from '../cache';
 
 
 export default function SpecialClassPage({ onBack }: { onBack: () => void }) {
-  const [vessels, setVessels] = useState<SpecialVesselRecord[]>([]);
+  const [vessels, setVessels] = useState<SpecialVesselRecord[]>(() => {
+    const cached = readPageCache<SpecialVesselRecord[]>('special-vessels', []);
+    return Array.isArray(cached) ? cached : [];
+  });
   const [error, setError] = useState('');
+  useEffect(() => writePageCache('special-vessels', vessels), [vessels]);
   useEffect(() => {
     fetch(`${API}/network/special-vessels`)
       .then(response => {

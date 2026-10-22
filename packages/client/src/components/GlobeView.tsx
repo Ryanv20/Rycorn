@@ -43,6 +43,8 @@ interface GlobeViewProps {
   simulationTimeHours: number;
   simulationRunning: boolean;
   clockProfileId?: string;
+  constructViewer: boolean;
+  onToggleConstructViewer: () => void;
 }
 
 const clockRates: Record<string, number> = {
@@ -92,7 +94,7 @@ function addStarfield(scene: THREE.Scene): void {
   };
   const positions: number[] = [];
   const shades: THREE.Color[] = [];
-  for (let index = 0; index < 520; index += 1) {
+  for (let index = 0; index < 160; index += 1) {
     const direction = new THREE.Vector3(random() * 2 - 1, random() * 2 - 1, random() * 2 - 1).normalize();
     direction.multiplyScalar(12 + random() * 12);
     positions.push(direction.x, direction.y, direction.z);
@@ -109,7 +111,6 @@ function addStarfield(scene: THREE.Scene): void {
 function addRouteLines(group: THREE.Group, routes: RouteRecord[], color: number, radiusOffset: number, opacity: number): number {
   let count = 0;
   const activeRoute = radiusOffset > 0.02;
-  const glowMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: opacity * 0.12, depthWrite: false });
   const lineMaterial = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
   for (const route of routes) {
     for (let pointIndex = 0; pointIndex < route.coordinates.length - 1; pointIndex += 1) {
@@ -119,11 +120,9 @@ function addRouteLines(group: THREE.Group, routes: RouteRecord[], color: number,
       const end = vectorFor(latitudeB, longitudeB, RADIUS + radiusOffset);
       const middle = start.clone().add(end).normalize().multiplyScalar(RADIUS + radiusOffset + 0.075);
       const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
-      const segment = curve.getPoints(24);
-      const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(segment), 32, activeRoute ? 0.0038 : 0.0028, 6, false);
+      const segment = curve.getPoints(10);
+      const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(segment), 12, activeRoute ? 0.0038 : 0.0028, 4, false);
       group.add(new THREE.Mesh(tube, lineMaterial));
-      const glow = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(segment), 32, activeRoute ? 0.010 : 0.0075, 6, false);
-      group.add(new THREE.Mesh(glow, glowMaterial));
       count += 1;
     }
   }
@@ -245,9 +244,9 @@ function disposeGroup(group: THREE.Group): void {
   });
 }
 
-export default function GlobeView({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, clockProfileId }: GlobeViewProps) {
+export default function GlobeView({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, clockProfileId, constructViewer, onToggleConstructViewer }: GlobeViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const dataRef = useRef({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning });
+  const dataRef = useRef({ routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, constructViewer });
   const simulationCursor = useRef({
     serverHours: simulationTimeHours,
     visualHours: simulationTimeHours,
@@ -257,6 +256,7 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
   });
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
   const globeGroupRef = useRef<THREE.Group | null>(null);
+  const graticuleRef = useRef<THREE.Group | null>(null);
   const portsGroupRef = useRef<THREE.Group | null>(null);
   const portsRef = useRef<PortRecord[]>([]);
   const nodesRef = useRef<NodeRecord[]>([]);
@@ -264,7 +264,11 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
   const [routeCount, setRouteCount] = useState(0);
   const [error, setError] = useState('');
 
-  dataRef.current = { routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning };
+  dataRef.current = { routes, vessels, ports, showPorts, showRoutes, showShips, selectedVesselId, onSelectVessel, simulationTimeHours, simulationRunning, constructViewer };
+
+  useEffect(() => {
+    if (graticuleRef.current) graticuleRef.current.visible = constructViewer;
+  }, [constructViewer]);
 
   useEffect(() => {
     const cursor = simulationCursor.current;
@@ -296,7 +300,7 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
         camera.position.set(0, 0.12, 6.9);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.12;
@@ -319,16 +323,20 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
         landTexture.offset.x = 0.5;
         landTexture.colorSpace = THREE.SRGBColorSpace;
         const sphere = new THREE.Mesh(
-          new THREE.SphereGeometry(RADIUS, 128, 96),
+          new THREE.SphereGeometry(RADIUS, 72, 48),
           new THREE.MeshStandardMaterial({ color: 0xffffff, map: landTexture, roughness: 0.98, metalness: 0 }),
         );
         globeGroup.add(sphere);
         const atmosphere = new THREE.Mesh(
-          new THREE.SphereGeometry(RADIUS * 1.035, 96, 64),
+          new THREE.SphereGeometry(RADIUS * 1.035, 40, 28),
           new THREE.MeshBasicMaterial({ color: 0x64bfce, transparent: true, opacity: 0.09, side: THREE.BackSide, depthWrite: false }),
         );
         globeGroup.add(atmosphere);
-        addGraticule(globeGroup);
+        const graticule = new THREE.Group();
+        addGraticule(graticule);
+        graticule.visible = dataRef.current.constructViewer;
+        globeGroup.add(graticule);
+        graticuleRef.current = graticule;
         globeGroupRef.current = globeGroup;
         nodesRef.current = nodes;
         const dynamicGroup = new THREE.Group();
@@ -436,6 +444,7 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
           renderer.domElement.remove();
           dynamicGroupRef.current = null;
           globeGroupRef.current = null;
+          graticuleRef.current = null;
           portsGroupRef.current = null;
           portsRef.current = [];
           nodesRef.current = [];
@@ -492,6 +501,14 @@ export default function GlobeView({ routes, vessels, ports, showPorts, showRoute
   return <section className="globe-stage" aria-label="Three-dimensional globe">
     <div className="globe-canvas" ref={hostRef} />
     <div className="globe-heading"><span className="globe-live-dot" /><div><strong>Ocean network</strong><small>Drag to rotate · scroll to zoom</small></div></div>
+    <button className={constructViewer ? 'globe-construct-toggle is-active' : 'globe-construct-toggle'} aria-pressed={constructViewer} onClick={onToggleConstructViewer}>CONSTRUCT VIEWER</button>
+    {constructViewer && <div className="globe-scale-reference" aria-label="Dimensioned 1,000 kilometer reference cube">
+      <svg viewBox="0 0 112 92" role="img" aria-hidden="true">
+        <path d="M20 27 55 10 91 27 56 45Z M20 27v39l36 18V45 M91 27v39L56 84 M56 45v39" fill="none" stroke="#a9f0dc" strokeWidth="1.5" />
+        <path d="M20 72 56 90 M17 69l6 3m30 15 6 3M95 29v39m-3-40 3-3 3 3m-3 43 3-3 3 3" fill="none" stroke="#80aee0" strokeWidth="1" />
+      </svg>
+      <div><strong>1,000 KM REFERENCE CUBE</strong><small>X · 1,000 KM &nbsp; Y · 1,000 KM &nbsp; Z · 1,000 KM</small></div>
+    </div>}
     <div className="globe-counts"><span><strong>{portCount.toLocaleString()}</strong><small>PORTS</small></span><span><strong>{routeCount}</strong><small>ROUTE LEGS</small></span><span><strong>{vessels.length}</strong><small>VESSELS</small></span></div>
     <div className="globe-legend" aria-label="Globe legend"><span><i className="legend-ship" /> In port</span><span><i className="legend-underway" /> Underway</span><span><i className="legend-active-route" /> Vessel routes</span><span><i className="legend-planned-route" /> Planned routes</span></div>
     <div className="globe-caption">Natural Earth coastline · scenario visualization only · not navigational guidance</div>

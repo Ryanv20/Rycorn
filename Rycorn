@@ -9,6 +9,17 @@ if [[ ! -f package.json || ! -f pnpm-workspace.yaml ]]; then
   exit 1
 fi
 
+# Prevent a second launcher from racing the first one for dynamically selected ports.
+if command -v flock >/dev/null 2>&1; then
+  lock_id="$(printf '%s' "$repo_root" | sha256sum | cut -c1-16)"
+  lock_file="${TMPDIR:-/tmp}/rycorn-${UID}-${lock_id}.lock"
+  exec 9>>"$lock_file"
+  if ! flock -n 9; then
+    echo "Rycorn is already running. Use the URLs printed by that launcher." >&2
+    exit 0
+  fi
+fi
+
 required_files=(
   "data/processed/canonical-ports.json"
   "data/raw/natural-earth/ne_10m_land.shp"
@@ -34,11 +45,15 @@ if ! pnpm install --offline --frozen-lockfile; then
   exit 1
 fi
 
+declare -A reserved_ports=()
+selected_port=""
 find_open_port() {
   local candidate="$1"
   while (( candidate < 65536 )); do
-    if node -e 'const server = require("node:net").createServer(); server.once("error", () => process.exit(1)); server.listen(Number(process.argv[1]), "0.0.0.0", () => server.close(() => process.exit(0)));' "$candidate" >/dev/null 2>&1; then
-      printf '%s' "$candidate"
+    if [[ -z "${reserved_ports[$candidate]+reserved}" ]] \
+      && node -e 'const server = require("node:net").createServer(); server.once("error", () => process.exit(1)); server.listen(Number(process.argv[1]), "0.0.0.0", () => server.close(() => process.exit(0)));' "$candidate" >/dev/null 2>&1; then
+      reserved_ports[$candidate]=1
+      selected_port="$candidate"
       return 0
     fi
     ((candidate += 1))
@@ -47,57 +62,55 @@ find_open_port() {
   return 1
 }
 
-api_port="$(find_open_port "${RYCORN_API_PORT:-3000}")"
-client_port="$(find_open_port "${RYCORN_CLIENT_PORT:-5173}")"
-port_console_port="$(find_open_port "${RYCORN_PORT_CONSOLE_PORT:-5176}")"
-waretrack_port="$(find_open_port "${RYCORN_WARETRACK_PORT:-5177}")"
+find_open_port "${RYCORN_API_PORT:-3000}"; api_port="$selected_port"
+find_open_port "${RYCORN_CLIENT_PORT:-5173}"; client_port="$selected_port"
+find_open_port "${RYCORN_LEKKI_CONSOLE_PORT:-5174}"; lekki_console_port="$selected_port"
+find_open_port "${RYCORN_PORT_CONSOLE_PORT:-5176}"; port_console_port="$selected_port"
+find_open_port "${RYCORN_SHIP_SIM_PORT:-5178}"; ship_sim_port="$selected_port"
 export RYCORN_API_PORT="$api_port"
 export RYCORN_CLIENT_PORT="$client_port"
+export RYCORN_LEKKI_CONSOLE_PORT="$lekki_console_port"
 export RYCORN_PORT_CONSOLE_PORT="$port_console_port"
-export RYCORN_WARETRACK_PORT="$waretrack_port"
+export RYCORN_SHIP_SIM_PORT="$ship_sim_port"
 export VITE_RYCORN_API_PORT="$api_port"
+export VITE_RYCORN_LEKKI_CONSOLE_PORT="$lekki_console_port"
 export NEXT_PUBLIC_RYCORN_API_ORIGIN="http://localhost:${api_port}"
+export NEXT_PUBLIC_RYCORN_LEKKI_CONSOLE_ORIGIN="http://localhost:${lekki_console_port}"
+export VITE_RYCORN_PORT_CONSOLE_PORT="$port_console_port"
+export VITE_RYCORN_SHIP_SIM_PORT="$ship_sim_port"
+export VITE_RYCORN_CLIENT_PORT="$client_port"
 
-waretrack_dir="$(cd -- "$repo_root/../WT/waretrack" 2>/dev/null && pwd)" || {
-  echo "Waretrack system directory is missing: ../WT/waretrack" >&2
-  exit 1
-}
-if [[ ! -f "$waretrack_dir/package.json" || ! -f "$waretrack_dir/pnpm-lock.yaml" ]]; then
-  echo "Waretrack package files are missing from $waretrack_dir" >&2
-  exit 1
-fi
-
-echo "Preparing Waretrack dependencies from the local pnpm cache (offline)..."
-if ! pnpm --dir "$waretrack_dir" install --offline --frozen-lockfile; then
-  echo "Waretrack cannot start offline because a dependency is missing from the local pnpm cache." >&2
-  echo "Reconnect once and run: pnpm --dir '$waretrack_dir' install" >&2
+lekki_port_dir="$repo_root/lekki-port-console"
+if [[ ! -f "$lekki_port_dir/package.json" || ! -x "$lekki_port_dir/node_modules/.bin/vite" ]]; then
+  echo "Lekki port dependencies are missing from $lekki_port_dir. Run npm install there first." >&2
   exit 1
 fi
-
-echo "Starting Rycorn API, WebSocket server, network client, Los Angeles port console, and Waretrack..."
+echo "Starting Rycorn API, WebSocket server, network client, both port consoles, and Ship Simulator..."
 echo "API: http://localhost:${api_port}"
 echo "Network client: http://localhost:${client_port}"
+echo "Lekki port console: http://localhost:${lekki_console_port}"
 echo "Los Angeles port console: http://localhost:${port_console_port}"
-echo "Waretrack: http://localhost:${waretrack_port}"
+echo "Ship Simulator: http://localhost:${ship_sim_port}"
 echo "Initialize and run the simulation from either console."
 lan_addresses="$(hostname -I 2>/dev/null || true)"
 if [[ -n "$lan_addresses" ]]; then
   for address in $lan_addresses; do
     echo "Phone on the same Wi-Fi (network client): http://${address}:${client_port}"
+    echo "Phone on the same Wi-Fi (Lekki port console): http://${address}:${lekki_console_port}"
     echo "Phone on the same Wi-Fi (LA port console): http://${address}:${port_console_port}"
-    echo "Phone on the same Wi-Fi (Waretrack): http://${address}:${waretrack_port}"
+    echo "Phone on the same Wi-Fi (Ship Simulator): http://${address}:${ship_sim_port}"
   done
 else
-  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port}, ${port_console_port}, or ${waretrack_port}."
+  echo "Phone on the same Wi-Fi: open this computer's IP address at port ${client_port}, ${lekki_console_port}, ${port_console_port}, or ${ship_sim_port}."
 fi
 
-pnpm -r --parallel --filter @rycon/server --filter @rycon/client --filter @rycorn/new-file dev &
+pnpm -r --parallel --filter @rycon/server --filter @rycon/client --filter @rycorn/los-angeles-port-console --filter @rycorn/ship-simulator dev &
 rycorn_pid=$!
-pnpm --dir "$waretrack_dir" exec vite --host 0.0.0.0 --port "$waretrack_port" &
-waretrack_pid=$!
+pnpm --dir "$lekki_port_dir" exec vite --host 0.0.0.0 --port "$lekki_console_port" &
+lekki_console_pid=$!
 cleanup() {
-  kill "$rycorn_pid" "$waretrack_pid" 2>/dev/null || true
-  wait "$rycorn_pid" "$waretrack_pid" 2>/dev/null || true
+  kill "$rycorn_pid" "$lekki_console_pid" 2>/dev/null || true
+  wait "$rycorn_pid" "$lekki_console_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-wait -n "$rycorn_pid" "$waretrack_pid"
+wait -n "$rycorn_pid" "$lekki_console_pid"

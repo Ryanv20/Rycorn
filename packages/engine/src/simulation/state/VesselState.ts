@@ -23,5 +23,6 @@ export interface VesselState {
   assignedCargoIds: string[];
   currentRoute?: RouteResult;
   currentVoyageStartedAt?: number;
+  baseExpectedArrivalAt?: number;
   expectedArrivalAt?: number;
 }

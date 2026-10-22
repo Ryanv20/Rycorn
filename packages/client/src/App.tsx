@@ -10,8 +10,10 @@ import NextStopPage from './components/NextStopPage';
 import ClockPage from './components/ClockPage';
 import SpecialClassPage from './components/SpecialClassPage';
 import DSGraphPage from './components/DSGraphPage';
+import AssetCatalogPage from './components/AssetCatalogPage';
 import type { SpecialVesselRecord } from './components/SpecialVesselMarker';
-import { API, WS } from './api';
+import { API, LEKKI_PORT_CONSOLE, LOS_ANGELES_PORT_CONSOLE, SHIP_SIMULATOR, WS } from './api';
+import { readPageCache, writePageCache } from './cache';
 
 type ViewMode = 'map' | 'routes' | 'fleet' | 'shipments' | 'activity';
 
@@ -136,8 +138,19 @@ export default function App() {
   const [page, setPage] = useState(() => normalizePath(window.location.pathname));
   const [view, setView] = useState<ViewMode>('map');
   const [query, setQuery] = useState('');
-  const [state, setState] = useState<AppState>({
-    vessels: [], cargoes: [], events: [], simulationTime: 0, timeMetadata: null, connected: false, systemStatus: null, errors: [], startedAt: null,
+  const [state, setState] = useState<AppState>(() => {
+    const empty: AppState = { vessels: [], cargoes: [], events: [], simulationTime: 0, timeMetadata: null, connected: false, systemStatus: null, errors: [], startedAt: null };
+    const cached = readPageCache<Partial<AppState> | null>('workspace-state', null);
+    if (!cached || !Array.isArray(cached.vessels) || !Array.isArray(cached.cargoes)) return empty;
+    return {
+      ...empty,
+      ...cached,
+      connected: false,
+      systemStatus: cached.systemStatus ? { ...cached.systemStatus, engineRunning: false } : null,
+      startedAt: null,
+      events: Array.isArray(cached.events) ? cached.events.slice(-500) : [],
+      errors: Array.isArray(cached.errors) ? cached.errors.slice(-100) : [],
+    };
   });
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState<string | null>(null);
@@ -154,9 +167,27 @@ export default function App() {
   const [followPoint, setFollowPoint] = useState<[number, number] | null>(null);
   const [cameraFollow, setCameraFollow] = useState(false);
   const [projection, setProjection] = useState<'map' | 'globe'>('map');
-  const [plannedRoutes, setPlannedRoutes] = useState<PlannedRouteRecord[]>([]);
-  const [specialVessels, setSpecialVessels] = useState<SpecialVesselRecord[]>([]);
-  const [portCatalog, setPortCatalog] = useState<PortRecord[]>([]);
+  const [constructViewer, setConstructViewer] = useState(false);
+  const [plannedRoutes, setPlannedRoutes] = useState<PlannedRouteRecord[]>(() => {
+    const cached = readPageCache<PlannedRouteRecord[]>('planned-routes', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [specialVessels, setSpecialVessels] = useState<SpecialVesselRecord[]>(() => {
+    const cached = readPageCache<SpecialVesselRecord[]>('special-vessels', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [portCatalog, setPortCatalog] = useState<PortRecord[]>(() => {
+    const cached = readPageCache<PortRecord[]>('port-catalog', []);
+    return Array.isArray(cached) ? cached : [];
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => writePageCache('workspace-state', { ...state, connected: false, events: state.events.slice(-500), errors: state.errors.slice(-100) }), 350);
+    return () => window.clearTimeout(timer);
+  }, [state]);
+  useEffect(() => writePageCache('planned-routes', plannedRoutes), [plannedRoutes]);
+  useEffect(() => writePageCache('special-vessels', specialVessels), [specialVessels]);
+  useEffect(() => writePageCache('port-catalog', portCatalog), [portCatalog]);
 
   useEffect(() => {
     const syncPage = () => setPage(normalizePath(window.location.pathname));
@@ -177,8 +208,10 @@ export default function App() {
   const selectVessel = (vesselId: string) => { setFollowPoint(null); setSelectedVesselId(vesselId); };
   const openDsSystem = () => { window.history.pushState({}, '', '/DS_system'); setPage('/ds_system'); };
   const openSimulation = () => { window.history.pushState({}, '', '/'); setPage('/'); };
-  const openPage = (nextPage: '/next-stop' | '/clock' | '/special-class' | '/ds-graph') => { window.history.pushState({}, '', nextPage); setPage(nextPage); };
+  const openPage = (nextPage: '/next-stop' | '/clock' | '/special-class' | '/ds-graph' | '/assets') => { window.history.pushState({}, '', nextPage); setPage(nextPage); };
   const followNode = (point: [number, number]) => { setSelectedVesselId(null); setFollowPoint(point); setCameraFollow(true); };
+  const openLosAngelesPortConsole = () => { window.open(LOS_ANGELES_PORT_CONSOLE, '_blank', 'noopener,noreferrer'); };
+  const openLekkiPortConsole = () => { window.open(LEKKI_PORT_CONSOLE, '_blank', 'noopener,noreferrer'); };
 
   const refreshTopology = async () => {
     try {
@@ -191,12 +224,12 @@ export default function App() {
       if (specialResponse.ok) setSpecialVessels(await specialResponse.json());
       if (portResponse.ok) setPortCatalog(await portResponse.json());
     } catch {
-      setPlannedRoutes([]);
+      // Keep the last good topology visible while the API reconnects.
     }
   };
 
   useEffect(() => {
-    if (page === '/ds_system' || page === '/ds-graph' || page === '/next-stop' || page === '/clock' || page === '/special-class') return;
+    if (page === '/ds_system' || page === '/ds-graph' || page === '/next-stop' || page === '/clock' || page === '/special-class' || page === '/assets') return;
     let reconnectTimer: number | undefined;
     let disposed = false;
     let ws: WebSocket;
@@ -241,6 +274,7 @@ export default function App() {
   if (page === '/next-stop') return <NextStopPage onBack={openSimulation} />;
   if (page === '/clock') return <ClockPage onBack={openSimulation} simulationTimeHours={state.simulationTime} timeMetadata={state.timeMetadata} startedAt={state.startedAt} running={!!state.systemStatus?.engineRunning} activeProfileId={state.systemStatus?.clockProfileId} />;
   if (page === '/special-class') return <SpecialClassPage onBack={openSimulation} />;
+  if (page === '/assets') return <AssetCatalogPage onBack={openSimulation} />;
   if (page !== '/') return <NotFoundPage path={window.location.pathname} onHome={openSimulation} />;
 
   return <div className="rycon-app">
@@ -251,6 +285,7 @@ export default function App() {
       </button>
       <div className="topbar-status"><span className={`connection-led ${state.connected ? 'is-connected' : ''}`} /><span>{state.connected ? 'LIVE LINK' : 'OFFLINE'}</span></div>
       <div className="topbar-actions">
+        <button className="header-action" onClick={() => window.open(SHIP_SIMULATOR, '_blank', 'noopener,noreferrer')} title="Open captain's bridge"><Ship size={16} /><span>CAPTAIN</span></button>
         <button className="header-action header-action-report" onClick={() => setReportOpen(true)} aria-label="Open operational report" title="Operational report"><FileText size={16} /><span>REPORT</span></button>
       </div>
     </header>
@@ -264,7 +299,7 @@ export default function App() {
 
     <main className={`workspace workspace-${view} ${railCollapsed ? 'has-collapsed-rail' : ''}`}>
       {view === 'map' || view === 'routes' ? <section className={`map-stage ${view === 'routes' ? 'map-stage-routes' : ''} ${projection === 'globe' && view === 'map' ? 'map-stage-globe' : ''}`} aria-label={view === 'routes' ? 'Planned sea routes' : 'Fleet map'}>
-        <Map vessels={visibleVessels} cargoes={state.cargoes} ports={portCatalog} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} showShips={showShips} showBunkers={showBunkers} showTraffic={showTraffic} showNodeLabels={showNodeLabels} routesOnly={view === 'routes'} projection={view === 'routes' ? 'map' : projection} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} followPoint={followPoint} onSelectVessel={selectVessel} onFollowNode={followNode} simulationTimeHours={state.simulationTime} simulationRunning={!!state.systemStatus?.engineRunning} clockProfileId={state.systemStatus?.clockProfileId} />
+        <Map vessels={visibleVessels} cargoes={state.cargoes} ports={portCatalog} plannedRoutes={plannedRoutes} specialVessels={specialVessels} showPorts={showPorts} showRoutes={showRoutes} showSpecial={showSpecial} showShips={showShips} showBunkers={showBunkers} showTraffic={showTraffic} showNodeLabels={showNodeLabels} routesOnly={view === 'routes'} projection={view === 'routes' ? 'map' : projection} cameraFollow={cameraFollow} selectedVesselId={selectedVesselId} followPoint={followPoint} onSelectVessel={selectVessel} onFollowNode={followNode} onOpenPortConsole={openLosAngelesPortConsole} onOpenLekkiPortConsole={openLekkiPortConsole} simulationTimeHours={state.simulationTime} simulationRunning={!!state.systemStatus?.engineRunning} clockProfileId={state.systemStatus?.clockProfileId} constructViewer={constructViewer} onToggleConstructViewer={() => setConstructViewer(value => !value)} />
         {projection !== 'globe' && <div className="map-title-overlay"><span className="map-live-pip" /><div><strong>{view === 'routes' ? 'Route atlas' : 'Fleet tracking'}</strong><small>{view === 'routes' ? `${tradeLaneCount} trade lanes · ${routeRegionCount} regions` : `${state.vessels.length.toLocaleString()} vessels · ${tradeLaneCount} planned lanes`}</small></div></div>}
         {projection !== 'globe' && <label className="map-search"><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search vessel, port, status" aria-label="Search vessels and ports" />{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={15} /></button>}<kbd>/</kbd></label>}
         {(view === 'map' || view === 'routes') && <div className="map-layer-tools" aria-label="Map controls">

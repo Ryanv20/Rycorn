@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Compass, GitBranch, Globe2, RefreshCw, Ship } from 'lucide-react';
 import { API } from '../api';
+import { readPageCache, writePageCache } from '../cache';
 
 
 interface ScenarioPlan {
@@ -32,6 +33,7 @@ interface ScenarioOption {
 }
 
 type Port = { portId: string; name: string; country: string; regionId: string };
+type NextStopCache = { scenarios: Record<string, ScenarioPlan>; options: ScenarioOption[]; ports: Port[] };
 
 function portName(nodeId: string, ports: Port[]): string {
   const portId = nodeId.startsWith('node-') ? nodeId.slice(5) : nodeId;
@@ -55,10 +57,11 @@ async function responseError(response: Response, fallback: string): Promise<stri
 }
 
 export default function NextStopPage({ onBack }: { onBack: () => void }) {
-  const [scenario, setScenario] = useState<ScenarioPlan | null>(null);
-  const [scenarioOptions, setScenarioOptions] = useState<ScenarioOption[]>([]);
-  const [ports, setPorts] = useState<Port[]>([]);
-  const [selectedScenarioId, setSelectedScenarioId] = useState('NEXT-STOP-10');
+  const [cache, setCache] = useState<NextStopCache>(() => readPageCache<NextStopCache>('next-stop', { scenarios: {}, options: [], ports: [] }));
+  const [selectedScenarioId, setSelectedScenarioId] = useState('TEST-LEKKI-LA');
+  const [scenario, setScenario] = useState<ScenarioPlan | null>(() => cache.scenarios['TEST-LEKKI-LA'] ?? null);
+  const scenarioOptions = cache.options;
+  const ports = cache.ports;
   const [error, setError] = useState('');
   const [applying, setApplying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,8 +75,13 @@ export default function NextStopPage({ onBack }: { onBack: () => void }) {
         fetch(`${API}/network/ports`),
       ]);
       setScenario(nextScenario);
-      if (optionsResponse.ok) setScenarioOptions(await optionsResponse.json());
-      if (portsResponse.ok) setPorts(await portsResponse.json());
+      const [nextOptions, nextPorts] = await Promise.all([
+        optionsResponse.ok ? optionsResponse.json() as Promise<ScenarioOption[]> : Promise.resolve(scenarioOptions),
+        portsResponse.ok ? portsResponse.json() as Promise<Port[]> : Promise.resolve(ports),
+      ]);
+      const nextCache = { scenarios: { ...cache.scenarios, [selectedScenarioId]: nextScenario }, options: nextOptions, ports: nextPorts };
+      setCache(nextCache);
+      writePageCache('next-stop', nextCache);
       setError('');
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load scenario');
@@ -82,6 +90,7 @@ export default function NextStopPage({ onBack }: { onBack: () => void }) {
     }
   };
   useEffect(() => { void load(); }, [selectedScenarioId]);
+  useEffect(() => writePageCache('next-stop', cache), [cache]);
 
   const applyScenario = async () => {
     setApplying(true);
@@ -112,7 +121,7 @@ export default function NextStopPage({ onBack }: { onBack: () => void }) {
     </header>
     <section className="scenario-picker" aria-label="Scenario selection">
       <label htmlFor="scenario-select">Scenario</label>
-      <select id="scenario-select" value={selectedScenarioId} onChange={event => setSelectedScenarioId(event.target.value)}>
+      <select id="scenario-select" value={selectedScenarioId} onChange={event => { setScenario(cache.scenarios[event.target.value] ?? null); setSelectedScenarioId(event.target.value); }}>
         {scenarioOptions.map(option => <option key={option.id} value={option.id}>{String(option.number).padStart(2, '0')} · {option.name}{option.continuous ? ' · Continuous' : ''}</option>)}
       </select>
       <span>{scenarioOptions.length} trade plans · includes one continuous global cycle</span>

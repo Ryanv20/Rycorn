@@ -182,6 +182,7 @@ export class EventProcessor {
     this.context.updateVessel(vessel.vesselId, {
       fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes,
       currentVoyageStartedAt: event.simulationTime,
+      baseExpectedArrivalAt: event.simulationTime + estimate.durationHours,
       expectedArrivalAt: event.simulationTime + estimate.durationHours,
     });
     
@@ -284,6 +285,7 @@ export class EventProcessor {
       assignedCargoIds: [],
       currentRoute: undefined,
       currentVoyageStartedAt: undefined,
+      baseExpectedArrivalAt: undefined,
       expectedArrivalAt: undefined,
     });
     
@@ -434,6 +436,7 @@ export class EventProcessor {
       currentRoute: route,
       fuelRemainingTonnes: fuelRemainingTonnes - fuelBurnTonnes,
       currentVoyageStartedAt: event.simulationTime,
+      baseExpectedArrivalAt: event.simulationTime + estimate.durationHours,
       expectedArrivalAt: event.simulationTime + estimate.durationHours,
     });
     this.queue.enqueue({
@@ -454,6 +457,7 @@ export class EventProcessor {
       currentNodeId: event.locationNodeId,
       currentRoute: undefined,
       currentVoyageStartedAt: undefined,
+      baseExpectedArrivalAt: undefined,
       expectedArrivalAt: undefined,
     });
     const cargoIds = Array.isArray(event.metadata.cargoIds)

@@ -219,6 +219,19 @@ export class SimulationEngine {
     return this.context;
   }
 
+  adjustVesselArrival(vesselId: string, deltaHours: number): number {
+    const vessel = this.context.getVessel(vesselId);
+    if (vessel.status !== 'SAILING' && vessel.status !== 'REPOSITIONING') {
+      throw new Error(`Vessel ${vesselId} is not underway`);
+    }
+    if (!Number.isFinite(deltaHours)) throw new Error('Arrival adjustment must be a finite number');
+    const eventType = vessel.status === 'REPOSITIONING' ? 'REPOSITION_ARRIVED' : 'ARRIVED';
+    const adjusted = this.queue.adjustTime(eventType, vesselId, deltaHours, this.clock.getTime() + 0.01);
+    if (!adjusted) throw new Error(`No scheduled arrival exists for vessel ${vesselId}`);
+    this.context.updateVessel(vesselId, { expectedArrivalAt: adjusted.simulationTime });
+    return adjusted.simulationTime;
+  }
+
   getEvents(): SimulationEvent[] {
     return this.events;
   }

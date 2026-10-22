@@ -576,7 +576,7 @@ No module becomes a dumping ground for unrelated logic.
 The repository has advanced beyond the original pre-implementation roadmap. The current workspace boundaries are:
 
 ```text
-DS_System/          Demand/supply contracts, validation, in-memory store
+demand-supply-system/          Demand/supply contracts, validation, in-memory store
 packages/engine/    Maritime graph, routing, movement, event simulation
 packages/server/    Composition root, API/WebSocket adapters, reports
 packages/client/    Operator console, map, event history, report exports
@@ -585,7 +585,7 @@ data/raw/           Immutable source data and provenance
 
 From the workspace root, `pnpm rycorn` starts the local API and client together.
 
-`DS_System` does not import the engine. The server adapts DS demand records into engine cargo definitions, supplies the fleet, and maps Rycon assignment/transit/delivery events back into DS lifecycle states. Requests can be edited or cancelled while pending; after assignment their execution state is controlled by Rycon.
+`demand-supply-system` does not import the engine. The server adapts DS demand records into engine cargo definitions, supplies the fleet, and maps Rycon assignment/transit/delivery events back into DS lifecycle states. Requests can be edited or cancelled while pending; after assignment their execution state is controlled by Rycon.
 
 ### Time and reporting
 
